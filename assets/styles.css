@@ -1,0 +1,307 @@
+
+html, body, div, span, applet, object, iframe,
+h1, h2, h3, h4, h5, h6, p, blockquote, pre,
+a, abbr, acronym, address, big, cite, code,
+del, dfn, em, img, ins, kbd, q, s, samp,
+small, strike, strong, sub, sup, tt, var,
+b, u, i, center,
+dl, dt, dd, ol, ul, li,
+fieldset, form, label, legend,
+table, caption, tbody, tfoot, thead, tr, th, td,
+article, aside, canvas, details, embed, 
+figure, figcaption, footer, header, hgroup, 
+menu, nav, output, ruby, section, summary,
+time, mark, audio, video {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	font-size: 100%;
+	font: inherit;
+	vertical-align: baseline;
+}
+/* HTML5 display-role reset for older browsers */
+article, aside, details, figcaption, figure, 
+footer, header, hgroup, menu, nav, section {
+	display: block;
+}
+body {
+	line-height: 1;
+}
+ol, ul {
+	list-style: none;
+}
+blockquote, q {
+	quotes: none;
+}
+blockquote:before, blockquote:after,
+q:before, q:after {
+	content: '';
+	content: none;
+}
+table {
+	border-collapse: collapse;
+	border-spacing: 0;
+}
+
+
+
+
+
+
+
+
+body {
+  background-color: rgb(22, 22, 22)
+}
+
+#center-div {
+  box-sizing: border-box;
+  margin: auto;
+  margin-top: 0;
+  margin-bottom: 0;
+  max-width: 800px;
+  height: 100vh;
+  border: 1px solid rgb(202, 202, 202);
+  display: flex;
+  justify-content: space-between;
+  flex-direction: column;
+  position: relative;
+}
+
+#messages-div {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column-reverse;
+  overflow-y: scroll;
+  scrollbar-width: none;
+}
+
+.story-msg {
+  align-self: flex-start;
+  border: 3px solid rgb(47, 136, 5);
+  background-color: rgb(17, 27, 17);
+  text-align: justify;
+  margin-right: 20%;
+  cursor: pointer;
+}
+
+.action-msg {
+  align-self: flex-end;
+  border: 3px solid rgb(209, 177, 33);
+  background-color: rgb(32, 28, 22);
+  text-align: right;
+  margin-left: 20%;
+}
+
+#editing-messages-div > .action-msg, #editing-messages-div > .story-msg {
+  border-style: dotted;
+  cursor: text;
+}
+
+#editing-messages-div > .action-msg:focus {
+  outline: none !important;
+  border-color: rgb(231, 203, 80);
+}
+
+#editing-messages-div > .story-msg:focus {
+  outline: none !important;
+  border-color: rgb(64, 173, 13);
+}
+
+#normal-messages-div, #editing-messages-div, #next-action-div {
+  margin: 10px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 10px;
+}
+
+#normal-messages-div {
+  margin-top: 20%;
+  margin-bottom: 0px;
+}
+
+#next-action-div {
+  margin-top: 10px;
+  margin-bottom: 0px;
+}
+
+
+.story-msg:hover {
+  border-color: rgb(64, 173, 13);
+}
+
+#next-action-div > .action-msg:hover, #editing-messages-div > .action-msg:hover {
+  border-color: rgb(231, 203, 80);
+}
+
+#next-action-div > .action-msg {
+  cursor: pointer;
+}
+
+#next-action-div:empty, #editing-messages-div:empty {
+  margin: 0px;
+}
+
+#editing-messages-div {
+  margin-top: 0px;
+  margin-bottom: 0px;
+}
+
+.story-msg, .action-msg {
+  color: rgb(241, 241, 241);
+  font-family: "Source Serif Pro", "Apple Garamond", "Baskerville", "Libre Baskerville", "Droid Serif", "Times New Roman", "Times", serif, "Noto Emoji", "Quivira";
+  font-variant-numeric: oldstyle-nums;
+  font-weight: 400;
+  hyphens: auto;
+  word-break: break-word;
+  width: fit-content;
+  padding-left: 10px;
+  padding-right: 10px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  border-radius: 10px;
+  font-size: 20px;
+  line-height: 32px;
+  min-width: 20px;
+  white-space: pre-wrap;
+}
+
+@media only screen and (max-width: 600px) {
+  .story-msg, .action-msg {
+    font-size: 18px;
+    line-height: 28px;
+  }
+  .story-msg {
+    margin-right: 5%
+  }
+  .action-msg {
+    margin-left: 5%
+  }
+}
+
+hr {
+  box-sizing: border-box;
+  flex-grow: 1;
+  width: 100%;
+  max-height: 0px;
+  color: rgb(202, 202, 202);
+  border-style:dashed;
+  margin-top: 5px;
+  margin-bottom: 5px;
+}
+
+#control-panel {
+  margin: auto;
+  margin-top: 100px;
+  margin-bottom: 0px;
+  height: 30px;
+  flex-grow: 0;
+  flex-shrink: 0;
+  z-index: 1;
+}
+
+#top-message-gradient {
+  box-sizing: border-box;
+  background-image: linear-gradient(rgb(22, 22, 22), rgba(22, 22, 22, 0));
+  width: 100%;
+  height: 6%;
+  top: calc(7% + 1px);
+  position: absolute;
+  pointer-events: none;
+}
+
+#bottom-message-gradient {
+  box-sizing: border-box;
+  background-image: linear-gradient(rgba(22, 22, 22, 0), rgb(22, 22, 22));
+  width: 100%;
+  height: 6%;
+  position: absolute;
+  top: calc(100% - 6%);
+  pointer-events: none;
+}
+
+#title-header {
+  height: 7%;
+  width: 100%;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgb(202, 202, 202);
+}
+
+#title-header > p {
+  color: rgb(241, 241, 241);
+  font-family: "Source Serif Pro", "Apple Garamond", "Baskerville", "Libre Baskerville", "Droid Serif", "Times New Roman", "Times", serif, "Noto Emoji", "Quivira";
+  font-variant-numeric: oldstyle-nums;
+  font-weight: 600;
+  hyphens: auto;
+  word-break: break-word;
+  font-size: 30px;
+  text-overflow: ellipsis;
+}
+
+@media only screen and (max-width: 600px) {
+  #title-header > p {
+    font-size: 26px;
+  }
+}
+
+#title-header > p {
+  text-transform: capitalize;
+}
+
+
+
+
+
+
+
+
+
+#story-list {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: scroll;
+  scrollbar-width: none;
+
+
+  color: rgb(241, 241, 241);
+  font-family: "Source Serif Pro", "Apple Garamond", "Baskerville", "Libre Baskerville", "Droid Serif", "Times New Roman", "Times", serif, "Noto Emoji", "Quivira";
+  font-variant-numeric: oldstyle-nums;
+  font-weight: 400;
+  hyphens: auto;
+  word-break: break-word;
+  font-size: 20px;
+  line-height: 32px;
+}
+
+.story-info {
+  min-height: 80px;
+  border-bottom: 1px solid rgb(202, 202, 202);
+  padding: 10px;
+}
+
+#logo {
+  float: left;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+
+[contenteditable="plaintext-only"]:empty:before {
+  content: attr(placeholder);
+  pointer-events: none;
+  display: block; /* For Firefox */
+  color: rgb(241, 241, 241);
+  animation: flickerAnimation 5s infinite;
+}
+
+@keyframes flickerAnimation {
+  0%   { opacity:0.6; }
+  50%  { opacity:0.4; }
+  100% { opacity:0.6; }
+}
+
+#title-header > p:focus {
+  outline: none !important;
+}
