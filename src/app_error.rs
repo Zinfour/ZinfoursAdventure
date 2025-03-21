@@ -3,6 +3,7 @@ use {
         http::{header::InvalidHeaderValue, StatusCode},
         response::{IntoResponse, Response},
     },
+    rand::seq::WeightError,
     redb::{CommitError, StorageError, TableError, TransactionError},
     std::time::SystemTimeError,
     tokio::task::JoinError,
@@ -17,6 +18,7 @@ pub enum AppError {
     CommitError(CommitError),
     SystemTimeError(SystemTimeError),
     InvalidHeaderValue(InvalidHeaderValue),
+    WeightError(WeightError),
 }
 
 impl IntoResponse for AppError {
@@ -47,6 +49,10 @@ impl IntoResponse for AppError {
             AppError::InvalidHeaderValue(invalidheader_error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 invalidheader_error.to_string(),
+            ),
+            AppError::WeightError(weighterror_error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                weighterror_error.to_string(),
             ),
         };
 
@@ -105,5 +111,11 @@ impl From<SystemTimeError> for AppError {
 impl From<InvalidHeaderValue> for AppError {
     fn from(invalidheader_err: InvalidHeaderValue) -> Self {
         AppError::InvalidHeaderValue(invalidheader_err)
+    }
+}
+
+impl From<WeightError> for AppError {
+    fn from(weighterror_err: WeightError) -> Self {
+        AppError::WeightError(weighterror_err)
     }
 }

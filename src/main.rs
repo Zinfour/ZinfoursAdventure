@@ -15,7 +15,7 @@
 //! ```not_rust
 //! cargo run -p example-websockets --bin example-client
 //! ```
-// #![allow(unused_imports)]
+#![allow(unused_imports)]
 // #![allow(dead_code)]
 mod app_error;
 
@@ -26,17 +26,18 @@ use {
         extract::{
             connect_info::ConnectInfo,
             ws::{CloseFrame, Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
-            Path, Query, State,
+            Path, Query, Request, State,
         },
         response::{IntoResponse, Redirect, Response},
         routing::{any, get, post, put},
-        Json, Router,
+        Json, Router, ServiceExt,
     },
     axum_extra::TypedHeader,
     axum_server::tls_rustls::RustlsConfig,
     bincode::{deserialize, serialize},
     futures::{sink::SinkExt, stream::StreamExt},
-    maud::{html, Markup, PreEscaped, DOCTYPE},
+    maud::{html, Escaper, Markup, PreEscaped, Render, DOCTYPE},
+    rand::{prelude::*, rng},
     redb::{
         backends::InMemoryBackend, Database, Key, MultimapTableDefinition, ReadableTable,
         ReadableTableMetadata, TableDefinition, TypeName, Value,
@@ -46,7 +47,7 @@ use {
     std::{
         any::type_name,
         cmp::Ordering,
-        fmt::Debug,
+        fmt::{Debug, Write},
         net::SocketAddr,
         ops::ControlFlow,
         path::PathBuf,
@@ -55,8 +56,10 @@ use {
         time::{Duration, SystemTime, UNIX_EPOCH},
     },
     tokio::task::spawn_blocking,
+    tower::Layer,
     tower_governor::{governor::GovernorConfigBuilder, GovernorLayer},
     tower_http::{
+        normalize_path::NormalizePathLayer,
         services::ServeFile,
         trace::{DefaultMakeSpan, TraceLayer},
     },
@@ -75,8 +78,6 @@ const CHILDREN_TABLE: MultimapTableDefinition<Bincode<Uuid>, Bincode<Uuid>> =
 //     TableDefinition::new("last_seen_actions");
 const ADVENTURES_TABLE: TableDefinition<Bincode<Uuid>, Bincode<Adventure>> =
     TableDefinition::new("adventures");
-
-const UUID_ZERO: Uuid = uuid!("00000000-0000-0000-0000-000000000000");
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct AdventureStep {
@@ -329,7 +330,11 @@ async fn main() {
     
 
     axum_server::bind_rustls(addr, tls_config)
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+        .serve(
+            ServiceExt::<Request>::into_make_service_with_connect_info::<SocketAddr>(
+                NormalizePathLayer::trim_trailing_slash().layer(app),
+            ),
+        )
         .await
         .unwrap();
     // axum::serve(
@@ -678,7 +683,36 @@ async fn adventure_story(
     Ok(document.into_response())
 }
 
-async fn directory(State(state): State<AppState>) -> Result<Markup, AppError> {
+#[derive(Deserialize, Debug)]
+enum SortBy {
+    TopAllTime,
+    TopThisYear,
+    TopThisMonth,
+    TopThisWeek,
+    TopThisDay,
+    Trending,
+    Length,
+    Random,
+    New,
+}
+
+impl Render for SortBy {
+    fn render_to(&self, output: &mut String) {
+        let mut escaper = Escaper::new(output);
+        write!(escaper, "{:?}", self).unwrap();
+    }
+}
+
+#[derive(Deserialize)]
+struct DirectoryQuery {
+    sort_by: Option<SortBy>,
+    page: Option<usize>,
+}
+
+async fn directory(
+    State(state): State<AppState>,
+    Query(query): Query<DirectoryQuery>,
+) -> Result<Markup, AppError> {
     let all_adventures = {
         let database = state.database.clone();
         spawn_blocking(move || {
@@ -711,17 +745,17 @@ async fn directory(State(state): State<AppState>) -> Result<Markup, AppError> {
                     p { "Zinfour's Adventure" }
                 }
                 #story-list {
-                    #directory-settings onchange="changed_directory_settings()" {
+                    #directory-settings onchange="changed_directory_settings()" selected=[query.sort_by] {
                         select #sort-by {
-                            option value="top_all_time" { "Top: All time" }
-                            option value="top_this_year" { "Top: This year" }
-                            option value="top_this_month" { "Top: This month" }
-                            option value="top_this_week" { "Top: This week" }
-                            option value="top_this_day" { "Top: Today" }
-                            option value="trending" { "Trending" }
-                            option value="length" { "Length" }
-                            option value="random" { "Random" }
-                            option value="new" { "New" }
+                            option value="TopAllTime" { "Top: All time" }
+                            option value="TopThisYear" { "Top: This year" }
+                            option value="TopThisMonth" { "Top: This month" }
+                            option value="TopThisWeek" { "Top: This week" }
+                            option value="TopThisDay" { "Top: Today" }
+                            option value="Trending" { "Trending" }
+                            option value="Length" { "Length" }
+                            option value="Random" { "Random" }
+                            option value="New" { "New" }
                         }
                         button #refresh-button title="Refresh" onclick="refresh_directory_button()" { "Refresh" }
                     }
@@ -800,25 +834,7 @@ async fn children(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<(Uuid, AdventureStep)>>, AppError> {
     let step_key = Uuid::from_str(&key).map_err(|e| e.to_string())?;
-    let children = {
-        let database = state.database.clone();
-        spawn_blocking(move || {
-            let read_txn = database.begin_read()?;
-            let children_table = read_txn.open_multimap_table(CHILDREN_TABLE)?;
-            let adventure_steps_table = read_txn.open_table(ADVENTURE_STEPS_TABLE)?;
-            let mut children = vec![];
-            for v in children_table.get(step_key)? {
-                let uuid = v?.value();
-                let step = adventure_steps_table
-                    .get(uuid)?
-                    .map(|v| v.value())
-                    .ok_or("couln't find adventure step.")?;
-                children.push((uuid, step));
-            }
-            Ok::<_, AppError>(children)
-        })
-        .await??
-    };
+    let children = get_children(&state.database, step_key).await?;
 
     // TODO: I don't like increasing viewcount like this because then we write to the database on every request.
     // Doing this in maybe another thread to reduce latency.
@@ -866,6 +882,38 @@ async fn children(
         Ok::<_, AppError>(())
     });
     Ok(Json(children))
+}
+
+async fn get_children(
+    database: &Arc<Database>,
+    uuid: Uuid,
+) -> Result<Vec<(Uuid, AdventureStep)>, AppError> {
+    let children = {
+        let database = database.clone();
+        spawn_blocking(move || {
+            let read_txn = database.begin_read()?;
+            let children_table = read_txn.open_multimap_table(CHILDREN_TABLE)?;
+            let adventure_steps_table = read_txn.open_table(ADVENTURE_STEPS_TABLE)?;
+            let mut all_children = vec![];
+            let rng = &mut rng();
+            for v in children_table.get(uuid)? {
+                let uuid = v?.value();
+                let step = adventure_steps_table
+                    .get(uuid)?
+                    .map(|v| v.value())
+                    .ok_or("couln't find adventure step.")?;
+                all_children.push((uuid, step));
+            }
+            let mut chosen_children = all_children
+                .choose_multiple_weighted(rng, 3, |(_, step)| step.views as f64)?
+                .cloned()
+                .collect::<Vec<_>>();
+            chosen_children.shuffle(rng);
+            Ok::<_, AppError>(chosen_children)
+        })
+        .await??
+    };
+    Ok(children)
 }
 
 // /// helper to print contents of messages to stdout. Has special treatment for Close.
