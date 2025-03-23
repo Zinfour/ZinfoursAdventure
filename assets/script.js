@@ -73,7 +73,7 @@ let refresh_next_action_div = async () => {
     let next_action_div = document.querySelector("#next-action-div")
     let current_uuid = window.location.pathname.substring(window.location.pathname.lastIndexOf('/') + 1)
     try {
-        const response = await fetch("https://zinfour.com/adventure/children/" + current_uuid);
+        const response = await fetch("/adventure/children/" + current_uuid);
         if (!response.ok) {
             throw new Error(`Response status: ${response.status}`);
         }
@@ -118,7 +118,7 @@ let save_button = async () => {
             let current_uuid = window.location.pathname.substring(window.location.pathname.lastIndexOf('/') + 1)
 
             try {
-                const response = await fetch("https://zinfour.com/adventure/new_step", {
+                const response = await fetch("/adventure/new_step", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
@@ -184,7 +184,7 @@ let go_back_to_origin = async () => {
 }
 
 let add_adventure_button = () => {
-    window.location.href = "https://zinfour.com/adventure/new"
+    window.location.href = "/adventure/new"
 }
 
 let choose_action = async (i) => {
@@ -210,7 +210,7 @@ let create_adventure = async () => {
     let title_text = document.querySelector("#title-header > p")
     let once_upon_a_time_div = document.querySelector(".story-msg")
     try {
-        const response = await fetch("https://zinfour.com/adventure/submit_adventure", {
+        const response = await fetch("/adventure/submit_adventure", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",

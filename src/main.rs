@@ -15,6 +15,7 @@
 //! ```not_rust
 //! cargo run -p example-websockets --bin example-client
 //! ```
+#![feature(let_chains)]
 #![allow(unused_imports)]
 // #![allow(dead_code)]
 mod app_error;
@@ -36,6 +37,7 @@ use {
     axum_server::tls_rustls::RustlsConfig,
     bincode::{deserialize, serialize},
     futures::{sink::SinkExt, stream::StreamExt},
+    itertools::Itertools,
     maud::{html, Escaper, Markup, PreEscaped, Render, DOCTYPE},
     rand::{prelude::*, rng},
     redb::{
@@ -327,8 +329,6 @@ async fn main() {
     // let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     // tracing::debug!("listening on {}", listener.local_addr().unwrap());
 
-    
-
     axum_server::bind_rustls(addr, tls_config)
         .serve(
             ServiceExt::<Request>::into_make_service_with_connect_info::<SocketAddr>(
@@ -589,16 +589,11 @@ async fn adventure_story(
             let adventure_steps_table = read_txn.open_table(ADVENTURE_STEPS_TABLE)?;
             let mut actions_and_stories = vec![];
             if let Some(mut current_uuid) = query.last_step {
-                loop {
-                    match adventure_steps_table.get(current_uuid)? {
-                        Some(v) => {
-                            let v = v.value();
-                            let v_parent = v.parent;
-                            actions_and_stories.push((current_uuid, v));
-                            current_uuid = v_parent;
-                        }
-                        None => break,
-                    }
+                while let Some(v) = adventure_steps_table.get(current_uuid)? {
+                    let v = v.value();
+                    let v_parent = v.parent;
+                    actions_and_stories.push((current_uuid, v));
+                    current_uuid = v_parent;
                 }
             }
             let adventures_table = read_txn.open_table(ADVENTURES_TABLE)?;
@@ -683,7 +678,7 @@ async fn adventure_story(
     Ok(document.into_response())
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 enum SortBy {
     TopAllTime,
     TopThisYear,
@@ -713,7 +708,9 @@ async fn directory(
     State(state): State<AppState>,
     Query(query): Query<DirectoryQuery>,
 ) -> Result<Markup, AppError> {
-    let all_adventures = {
+    let page = query.page.unwrap_or(1);
+    let items_per_page = 10;
+    let chosen_adventures: Vec<(Uuid, Adventure)> = {
         let database = state.database.clone();
         spawn_blocking(move || {
             let read_txn = database.begin_read()?;
@@ -724,10 +721,131 @@ async fn directory(
                 let adv_val = v.value();
                 all_adventures.push((k.value(), adv_val));
             }
-            Ok::<_, AppError>(all_adventures)
+            drop(read_txn);
+            
+            let adventures = match query.sort_by {
+                None | Some(SortBy::TopAllTime) => {
+                    all_adventures
+                        .into_iter()
+                        .sorted_by_key(|(_, adv_val)| adv_val.views)
+                        .rev()
+                        .skip(items_per_page * page.saturating_sub(1))
+                        .take(items_per_page)
+                        .collect()
+                }
+                Some(SortBy::TopThisYear) => {
+                    let unix_time = get_unix_time();
+                    all_adventures
+                        .into_iter()
+                        .filter(|(_, adv_val)| {
+                            unix_time.saturating_sub(adv_val.creation_time)
+                                < 1000 * 60 * 60 * 24 * 365
+                        })
+                        .sorted_by_key(|(_, adv_val)| adv_val.views)
+                        .rev()
+                        .skip(items_per_page * page.saturating_sub(1))
+                        .take(items_per_page)
+                        .collect()
+                }
+                Some(SortBy::TopThisMonth) => {
+                    let unix_time = get_unix_time();
+                    all_adventures
+                        .into_iter()
+                        .filter(|(_, adv_val)| {
+                            unix_time.saturating_sub(adv_val.creation_time)
+                                < 1000 * 60 * 60 * 24 * 30
+                        })
+                        .sorted_by_key(|(_, adv_val)| adv_val.views)
+                        .rev()
+                        .skip(items_per_page * page.saturating_sub(1))
+                        .take(items_per_page)
+                        .collect()
+                }
+                Some(SortBy::TopThisWeek) => {
+                    let unix_time = get_unix_time();
+                    all_adventures
+                        .into_iter()
+                        .filter(|(_, adv_val)| {
+                            unix_time.saturating_sub(adv_val.creation_time)
+                                < 1000 * 60 * 60 * 24 * 7
+                        })
+                        .sorted_by_key(|(_, adv_val)| adv_val.views)
+                        .rev()
+                        .skip(items_per_page * page.saturating_sub(1))
+                        .take(items_per_page)
+                        .collect()
+                }
+                Some(SortBy::TopThisDay) => {
+                    let unix_time = get_unix_time();
+                    all_adventures
+                        .into_iter()
+                        .filter(|(_, adv_val)| {
+                            unix_time.saturating_sub(adv_val.creation_time) < 1000 * 60 * 60 * 24
+                        })
+                        .sorted_by_key(|(_, adv_val)| adv_val.views)
+                        .rev()
+                        .skip(items_per_page * page.saturating_sub(1))
+                        .take(items_per_page)
+                        .collect()
+                }
+                Some(SortBy::Trending) => {
+                    // Trending is sorted by views but with a halftime of 1 day.
+                    let unix_time = get_unix_time();
+                    all_adventures
+                        .into_iter()
+                        .sorted_by_key(|(_, adv_val)| {
+                            (adv_val.views as f64
+                                * (-(unix_time.saturating_sub(adv_val.creation_time) as f64
+                                    / (1000 * 60 * 60 * 24) as f64))
+                                    .exp2()) as u64
+                        })
+                        .rev()
+                        .skip(items_per_page * page.saturating_sub(1))
+                        .take(items_per_page)
+                        .collect()
+                }
+                Some(SortBy::Length) => {
+                    all_adventures
+                        .into_iter()
+                        .sorted_by_key(|(_, adv_val)| adv_val.length)
+                        .skip(items_per_page * page.saturating_sub(1))
+                        .take(items_per_page)
+                        .collect()
+                }
+                Some(SortBy::Random) => {
+                    all_adventures.shuffle(&mut rng());
+                    all_adventures
+                        .into_iter()
+                        .skip(items_per_page * page.saturating_sub(1))
+                        .take(items_per_page)
+                        .collect()
+                }
+                Some(SortBy::New) => {
+                    all_adventures
+                        .into_iter()
+                        .sorted_by_key(|(_, adv_val)| adv_val.creation_time)
+                        .rev()
+                        .skip(items_per_page * page.saturating_sub(1))
+                        .take(items_per_page)
+                        .collect()
+                }
+            };
+            Ok::<_, AppError>(adventures)
         })
         .await??
     };
+
+    let sort_by_options = vec![
+        (SortBy::Trending, "Trending"),
+        (SortBy::TopAllTime, "Top: All time"),
+        (SortBy::TopThisYear, "Top: This year"),
+        (SortBy::TopThisMonth, "Top: This month"),
+        (SortBy::TopThisWeek, "Top: This week"),
+        (SortBy::TopThisDay, "Top: Today"),
+        (SortBy::Length, "Length"),
+        (SortBy::Random, "Random"),
+        (SortBy::New, "New"),
+    ];
 
     let document = html! {
         (DOCTYPE)
@@ -741,29 +859,21 @@ async fn directory(
         body {
             #center-div {
                 #title-header {
-                    img #logo src="logo.png" alt="Home";
+                    img #logo src="/logo.png" alt="Home";
                     p { "Zinfour's Adventure" }
                 }
                 #story-list {
-                    #directory-settings onchange="changed_directory_settings()" selected=[query.sort_by] {
-                        select #sort-by {
-                            option value="TopAllTime" { "Top: All time" }
-                            option value="TopThisYear" { "Top: This year" }
-                            option value="TopThisMonth" { "Top: This month" }
-                            option value="TopThisWeek" { "Top: This week" }
-                            option value="TopThisDay" { "Top: Today" }
-                            option value="Trending" { "Trending" }
-                            option value="Length" { "Length" }
-                            option value="Random" { "Random" }
-                            option value="New" { "New" }
+                    #directory-settings {
+                        select #sort-by onchange="document.location.href=\"/adventure?sort_by=\" + this.value" {
+                            @for (sb, txt) in sort_by_options {
+                                option value=(sb) selected[query.sort_by == Some(sb)] { (txt) }
+                            }
                         }
-                        button #refresh-button title="Refresh" onclick="refresh_directory_button()" { "Refresh" }
                     }
                     #story-info-list {
-                        @for (uuid, adventure) in all_adventures {
+                        @for (uuid, adventure) in chosen_adventures {
                             ."story-info" {
                                 a href={ "/adventure/" (uuid) } { (adventure.title) }
-                                p { (adventure.views) }
                             }
                         }
                     }
@@ -845,16 +955,11 @@ async fn children(
             let adventure_steps_table = read_txn.open_table(ADVENTURE_STEPS_TABLE)?;
             let mut actions_and_stories = vec![];
             let mut current_uuid = step_key;
-            loop {
-                match adventure_steps_table.get(current_uuid)? {
-                    Some(v) => {
-                        let v = v.value();
-                        let v_parent = v.parent;
-                        actions_and_stories.push((current_uuid, v));
-                        current_uuid = v_parent;
-                    }
-                    None => break,
-                }
+            while let Some(v) = adventure_steps_table.get(current_uuid)? {
+                let v = v.value();
+                let v_parent = v.parent;
+                actions_and_stories.push((current_uuid, v));
+                current_uuid = v_parent;
             }
             Ok::<_, AppError>((actions_and_stories, current_uuid))
         }?;

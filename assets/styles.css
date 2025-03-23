@@ -306,7 +306,7 @@ hr {
   outline: none !important;
 }
 
- /* unvisited link */
+/* unvisited link */
 .story-info > a:link {
   color: rgb(241, 241, 241);
 }
