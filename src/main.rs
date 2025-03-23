@@ -490,12 +490,16 @@ async fn new_adventure() -> Result<impl IntoResponse, AppError> {
             link rel="stylesheet" href="/styles.css";
             link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source Serif Pro";
             meta name="viewport" content="width=device-width, initial-scale=1.0";
-            script src="/script.js" defer {};
+            script src="/script.js" {};
         }
         body {
             #center-div {
                 #title-header {
-                    img #back-button;
+                    a href="/adventure" {
+                        #logo-div {
+                            img #logo src="/logo.png" alt="Zinfour's Adventure logo";
+                        }
+                    }
                     p contenteditable="plaintext-only" placeholder="Title..." { "" }
                 }
                 #top-message-gradient {};
@@ -521,10 +525,13 @@ async fn submit_adventure(
 ) -> Result<Json<Uuid>, AppError> {
     println!("\n\n{:?}\n", payload);
     if payload.title.trim().is_empty() {
-        Err("Missing title.")?;
+        Err(AppError::BadRequestError("Missing title.".to_string()))?;
+    }
+    if payload.title.len() > 50 {
+        Err(AppError::BadRequestError("Title too long".to_string()))?;
     }
     if payload.once_upon_a_time.trim().is_empty() {
-        Err("Missing initial paragraph.")?;
+        Err(AppError::BadRequestError("Missing initial paragraph.".to_string()))?;
     }
     let adventure_key = {
         let database = state.database.clone();
@@ -544,32 +551,6 @@ async fn submit_adventure(
 
     Ok(Json(adventure_key))
 }
-
-// pub fn custom_escape_to_string(input: &str) -> PreEscaped<String> {
-//     let mut output = Vec::new();
-//     let mut input: &[char] = &input.chars().collect::<Vec<_>>();
-
-//     let pat_replace = [
-//         ("&nbsp;", "\u{00A0}"),
-//         ("<br>", "<br>"),
-//         ("&", "&"),
-//         ("<", "&lt;"),
-//         (">", "&gt;"),
-//         ("\"", "&quot;"),
-//     ];
-//     'outer: while !input.is_empty() {
-//         for (pat, replace) in pat_replace {
-//             if input.starts_with(&pat.chars().collect::<Vec<_>>()) {
-//                 output.extend(replace.chars());
-//                 input = &input[pat.chars().count()..];
-//                 continue 'outer;
-//             }
-//         }
-//         output.push(input[0]);
-//         input = &input[1..];
-//     }
-//     PreEscaped(output.into_iter().collect())
-// }
 
 #[derive(Deserialize)]
 struct AdventureStoryQuery {
@@ -613,12 +594,16 @@ async fn adventure_story(
             link rel="stylesheet" href="/styles.css";
             link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source Serif Pro";
             meta name="viewport" content="width=device-width, initial-scale=1.0";
-            script src="/script.js" defer {};
+            script src="/script.js" {};
         }
         body {
             #center-div {
                 #title-header {
-                    img #back-button;
+                    a href="/adventure" {
+                        #logo-div {
+                            img #logo src="/logo.png" alt="Zinfour's Adventure logo";
+                        }
+                    }
                     p { (adventure.title) }
                 }
                 #top-message-gradient {};
@@ -854,12 +839,16 @@ async fn directory(
             link rel="stylesheet" href="/styles.css";
             link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source Serif Pro";
             meta name="viewport" content="width=device-width, initial-scale=1.0";
-            script src="/script.js" defer {};
+            script src="/script.js" {};
         }
         body {
             #center-div {
                 #title-header {
-                    img #logo src="/logo.png" alt="Home";
+                    a href="/adventure" {
+                        #logo-div {
+                            img #logo src="/logo.png" alt="Zinfour's Adventure logo";
+                        }
+                    }
                     p { "Zinfour's Adventure" }
                 }
                 #story-list {

@@ -10,7 +10,8 @@ use {
 };
 
 pub enum AppError {
-    StringError(String),
+    BadRequestError(String),
+    InternalServerError(String),
     TransactionError(TransactionError),
     StorageError(StorageError),
     TableError(TableError),
@@ -25,7 +26,8 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         // How we want errors responses to be serialized
         let (status, message): (StatusCode, String) = match self {
-            AppError::StringError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+            AppError::BadRequestError(msg) => (StatusCode::BAD_REQUEST, msg),
+            AppError::InternalServerError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             AppError::TransactionError(transaction_error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 transaction_error.to_string(),
@@ -62,13 +64,13 @@ impl IntoResponse for AppError {
 
 impl From<&str> for AppError {
     fn from(msg: &str) -> Self {
-        AppError::StringError(msg.to_string())
+        AppError::InternalServerError(msg.to_string())
     }
 }
 
 impl From<String> for AppError {
     fn from(msg: String) -> Self {
-        AppError::StringError(msg)
+        AppError::InternalServerError(msg)
     }
 }
 
