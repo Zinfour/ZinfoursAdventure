@@ -305,3 +305,23 @@ hr {
 #title-header > p:focus {
   outline: none !important;
 }
+
+ /* unvisited link */
+.story-info > a:link {
+  color: rgb(241, 241, 241);
+}
+
+/* visited link */
+.story-info > a:visited {
+  color: rgb(202, 202, 202);
+}
+
+/* mouse over link */
+.story-info > a:hover {
+  color: rgb(182, 182, 182);
+}
+
+/* selected link */
+.story-info > a:active {
+  color: rgb(182, 182, 182);
+}
