@@ -71,7 +71,13 @@ let discard_button = () => {
 
 let refresh_next_action_div = async () => {
     let next_action_div = document.querySelector("#next-action-div")
-    let current_uuid = window.location.pathname.substring(window.location.pathname.lastIndexOf('/') + 1)
+    
+    let params = new URLSearchParams(document.location.search);
+    let current_uuid = params.get("last_step");
+    if (current_uuid == null) {
+        current_uuid = window.location.pathname.substring(window.location.pathname.lastIndexOf('/') + 1)
+    }
+
     try {
         const response = await fetch("/adventure/children/" + current_uuid);
         if (!response.ok) {
@@ -91,7 +97,6 @@ let refresh_next_action_div = async () => {
             new_children.push(new_action)
             i += 1
         }
-        console.log(new_children)
         next_action_div.replaceChildren(...new_children)
 
     } catch (error) {
@@ -115,7 +120,11 @@ let save_button = async () => {
             let story_node = editing_msg_div.lastChild
             normal_msg_div.prepend(story_node)
 
-            let current_uuid = window.location.pathname.substring(window.location.pathname.lastIndexOf('/') + 1)
+            let params = new URLSearchParams(document.location.search);
+            let current_uuid = params.get("last_step");
+            if (current_uuid == null) {
+                current_uuid = window.location.pathname.substring(window.location.pathname.lastIndexOf('/') + 1)
+            }
 
             try {
                 const response = await fetch("/adventure/new_step", {
@@ -135,7 +144,10 @@ let save_button = async () => {
 
                 const json = await response.json();
 
-                window.history.replaceState(null, document.title, "/adventure/" + json.toString())
+                const url = new URL(window.location.href);
+                url.searchParams.set('last_step', json.toString());
+            
+                window.history.replaceState(null, document.title, url)
                 story_node.dataset.uuid = json
                 action_node.dataset.uuid = json
             } catch (error) {
@@ -164,7 +176,11 @@ let go_back_to_story = async (i) => {
         }
     }
 
-    window.history.replaceState(null, document.title, "/adventure/" + normal_msg_div.firstChild.dataset.uuid)
+    
+    const url = new URL(window.location.href);
+    url.searchParams.set('last_step', normal_msg_div.firstChild.dataset.uuid);
+
+    window.history.replaceState(null, document.title, url)
     await refresh_next_action_div()
 }
 
@@ -201,8 +217,10 @@ let choose_action = async (i) => {
     new_story.setAttribute("onclick", "go_back_to_story(" + (Math.ceil(normal_msg_div.childElementCount / 2 - 1)).toString() + ")")
     normal_msg_div.prepend(new_story)
 
+    const url = new URL(window.location.href);
+    url.searchParams.set('last_step', normal_msg_div.firstChild.dataset.uuid);
 
-    window.history.replaceState(null, document.title, "/adventure/" + normal_msg_div.firstChild.dataset.uuid)
+    window.history.replaceState(null, document.title, url)
     await refresh_next_action_div()
 }
 

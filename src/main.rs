@@ -502,7 +502,6 @@ async fn new_adventure() -> Result<impl IntoResponse, AppError> {
                     }
                     p contenteditable="plaintext-only" placeholder="Title..." { "" }
                 }
-                #top-message-gradient {};
                 #messages-div {
                     #control-panel {
                         button #add-button title="Create" onclick="create_adventure()" { "Create" }
@@ -511,7 +510,6 @@ async fn new_adventure() -> Result<impl IntoResponse, AppError> {
                         ."story-msg" contenteditable="plaintext-only" placeholder="Once upon a time..." { "" }
                     }
                 }
-                #bottom-message-gradient {};
             }
         }
     };
@@ -606,7 +604,6 @@ async fn adventure_story(
                     }
                     p { (adventure.title) }
                 }
-                #top-message-gradient {};
                 #messages-div {
                     #control-panel {
                         button #add-button title="Extend" onclick="add_button()" { "Extend" }
@@ -624,10 +621,7 @@ async fn adventure_story(
 
                         ."story-msg" onclick={"go_back_to_origin()"} data-uuid={ (adventure_key) } { (adventure.once_upon_a_time) }
                     }
-
-
                 }
-                #bottom-message-gradient {};
             }
         }
     };
@@ -999,7 +993,7 @@ async fn get_children(
                 all_children.push((uuid, step));
             }
             let mut chosen_children = all_children
-                .choose_multiple_weighted(rng, 3, |(_, step)| step.views as f64)?
+                .choose_multiple_weighted(rng, 3, |(_, step)| step.views as f64 + 1.0)?
                 .cloned()
                 .collect::<Vec<_>>();
             chosen_children.shuffle(rng);
