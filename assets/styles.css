@@ -43,7 +43,9 @@ table {
 	border-spacing: 0;
 }
 
-
+:root {
+  --title-header-height: 60px;
+}
 
 
 
@@ -125,6 +127,7 @@ body {
   margin-top: 10px;
   margin-bottom: 0px;
   min-height: 164px;
+  flex-shrink: 0;
 }
 
 
@@ -174,6 +177,7 @@ body {
   min-width: 20px;
   white-space: pre-wrap;
   scroll-margin-top: 100px;
+  min-height: 32px;
 }
 
 hr {
@@ -205,14 +209,14 @@ hr {
     rgba(22, 22, 22, 0) 94%,
     rgb(22, 22, 22));
   width: 100%;
-  height: calc(100% - (100px + 1px));
-  top: calc(100px + 1px);
+  height: calc(100% - (var(--title-header-height) + 1px));
+  top: calc(var(--title-header-height) + 1px);
   position: absolute;
   pointer-events: none;
 }
 
 #title-header {
-  height: 100px;
+  height: var(--title-header-height);
   width: 100%;
   flex-shrink: 0;
   border-bottom: 1px solid rgb(202, 202, 202);
@@ -238,7 +242,7 @@ hr {
 }
 
 #title-header > a {
-  width: 100px;
+  width: var(--title-header-height);
 }
 
 
@@ -273,14 +277,14 @@ hr {
 }
 
 #logo {
-  width: 80px;
-  height: 80px;
-  margin: 10px;
+  width: (var(--title-header-height) - 10px);
+  height: calc(var(--title-header-height) - 10px);
+  margin: 5px;
 }
 
 #logo-div {
-  width: 100px;
-  height: 100px;
+  width: var(--title-header-height);
+  height: var(--title-header-height);
   flex-grow: 0;
   flex-shrink: 0;
   border-right: 1px solid rgb(202, 202, 202);;

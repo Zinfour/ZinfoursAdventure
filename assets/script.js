@@ -180,7 +180,8 @@ let go_back_to_story = async (i) => {
     }
     let story_action_steps = (normal_msg_div.childElementCount - 1) / 2
     if (story_action_steps - (i + 1) > 0) {
-        discard_editing()
+        document.querySelector("#next-action-div").replaceChildren()
+
         for (k = 0; k < story_action_steps - (i + 1); k++) {
             let stories = normal_msg_div.getElementsByClassName('story-msg')
             normal_msg_div.removeChild(stories[stories.length - 1]);
@@ -198,7 +199,10 @@ let go_back_to_story = async (i) => {
 }
 
 let go_back_to_origin = async () => {
-    discard_editing()
+    if (document.querySelector("#normal-messages-div").childElementCount > 1) {
+        document.querySelector("#next-action-div").replaceChildren()
+    }
+
     let normal_msg_div = document.querySelector("#normal-messages-div")
     if (normal_msg_div.childElementCount > 1) {
         let next_action_div = document.querySelector("#next-action-div")
