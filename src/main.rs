@@ -875,6 +875,12 @@ async fn new_step(
     Json(payload): Json<AdventureStep>,
 ) -> Result<Json<Uuid>, AppError> {
     let new_step_uuid = Uuid::new_v4();
+    if payload.action.len() > 100 {
+        Err(AppError::BadRequestError("Too long action.".to_string()))?;
+    }
+    if payload.story.len() > 6000 {
+        Err(AppError::BadRequestError("Too long story.".to_string()))?;
+    }
     println!("{:?}", payload);
     {
         let database = state.database.clone();
