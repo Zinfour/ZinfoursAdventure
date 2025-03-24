@@ -523,13 +523,13 @@ async fn submit_adventure(
 ) -> Result<Json<Uuid>, AppError> {
     println!("\n\n{:?}\n", payload);
     if payload.title.trim().is_empty() {
-        Err(AppError::BadRequestError("Missing title.".to_string()))?;
+        return Err(AppError::BadRequestError("Missing title.".to_string()));
     }
     if payload.title.len() > 50 {
-        Err(AppError::BadRequestError("Title too long".to_string()))?;
+        return Err(AppError::BadRequestError("Title too long".to_string()));
     }
     if payload.once_upon_a_time.trim().is_empty() {
-        Err(AppError::BadRequestError("Missing initial paragraph.".to_string()))?;
+        return Err(AppError::BadRequestError("Missing initial paragraph.".to_string()));
     }
     let adventure_key = {
         let database = state.database.clone();
@@ -876,10 +876,10 @@ async fn new_step(
 ) -> Result<Json<Uuid>, AppError> {
     let new_step_uuid = Uuid::new_v4();
     if payload.action.len() > 100 {
-        Err(AppError::BadRequestError("Too long action.".to_string()))?;
+        return Err(AppError::BadRequestError("Too long action.".to_string()));
     }
     if payload.story.len() > 6000 {
-        Err(AppError::BadRequestError("Too long story.".to_string()))?;
+        return Err(AppError::BadRequestError("Too long story.".to_string()));
     }
     println!("{:?}", payload);
     {
