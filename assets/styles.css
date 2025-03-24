@@ -71,9 +71,10 @@ body {
 #messages-div {
   flex-grow: 1;
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   overflow-y: scroll;
   scrollbar-width: none;
+  padding-top: 100px;
 }
 
 .story-msg {
@@ -111,12 +112,12 @@ body {
 #normal-messages-div, #editing-messages-div, #next-action-div {
   margin: 10px;
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   gap: 10px;
 }
 
 #normal-messages-div {
-  margin-top: 20%;
+  margin-top: 0px;
   margin-bottom: 0px;
 }
 
@@ -164,19 +165,7 @@ body {
   line-height: 32px;
   min-width: 20px;
   white-space: pre-wrap;
-}
-
-@media only screen and (max-width: 600px) {
-  .story-msg, .action-msg {
-    font-size: 18px;
-    line-height: 28px;
-  }
-  .story-msg {
-    margin-right: 5%
-  }
-  .action-msg {
-    margin-left: 5%
-  }
+  scroll-margin-top: 100px;
 }
 
 hr {
@@ -237,12 +226,6 @@ hr {
   margin-bottom: auto;
   overflow: hidden;
   align-items: center;
-}
-
-@media only screen and (max-width: 600px) {
-  #title-header > p {
-    font-size: 26px;
-  }
 }
 
 
@@ -337,4 +320,24 @@ hr {
 
 #directory-settings {
   border-bottom: 1px solid rgb(202, 202, 202);
+}
+
+
+@media only screen and (max-width: 600px) {
+  .story-msg, .action-msg {
+    font-size: 18px;
+    line-height: 28px;
+  }
+  .story-msg {
+    margin-right: 0%
+  }
+  .action-msg {
+    margin-left: 0%
+  }
+  #title-header > p {
+    font-size: 26px;
+  }
+  #center-div {
+    border: none;
+  }
 }

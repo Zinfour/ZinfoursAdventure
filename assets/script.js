@@ -35,19 +35,20 @@ let add_button = () => {
         let next_action_div = document.querySelector("#next-action-div")
         next_action_div.replaceChildren()
     }
+
     let new_action = document.createElement("div")
     new_action.classList.add("action-msg")
     new_action.textContent = ""
     new_action.setAttribute("placeholder", "Do this...")
     new_action.contentEditable = "plaintext-only"
-    edit_div.prepend(new_action)
+    edit_div.append(new_action)
 
     let new_story = document.createElement("div")
     new_story.classList.add("story-msg")
     new_story.textContent = ""
     new_story.setAttribute("placeholder", "You do that...")
     new_story.contentEditable = "plaintext-only"
-    edit_div.prepend(new_story)
+    edit_div.append(new_story)
 
     editing_steps += 1
 }
@@ -109,16 +110,18 @@ let save_button = async () => {
     if (editing_msg_div.childElementCount > 0) {
         let normal_msg_div = document.querySelector("#normal-messages-div")
         while (editing_msg_div.children.length > 0) {
-            editing_msg_div.lastChild.removeAttribute("contentEditable")
-            let action_text = editing_msg_div.lastChild.innerText
-            let action_node = editing_msg_div.lastChild
-            normal_msg_div.prepend(action_node)
 
-            editing_msg_div.lastChild.removeAttribute("contentEditable")
-            editing_msg_div.lastChild.setAttribute("onclick", "go_back_to_story(" + (Math.ceil(normal_msg_div.childElementCount / 2 - 1)).toString() + ")")
-            let story_text = editing_msg_div.lastChild.innerText
-            let story_node = editing_msg_div.lastChild
-            normal_msg_div.prepend(story_node)
+            editing_msg_div.firstChild.removeAttribute("contentEditable")
+            let action_text = editing_msg_div.firstChild.innerText
+            let action_node = editing_msg_div.firstChild
+            normal_msg_div.append(action_node)
+
+            editing_msg_div.firstChild.removeAttribute("contentEditable")
+            editing_msg_div.firstChild.setAttribute("onclick", "go_back_to_story(" + (Math.ceil(normal_msg_div.childElementCount / 2 - 1)).toString() + ")")
+            let story_text = editing_msg_div.firstChild.innerText
+            let story_node = editing_msg_div.firstChild
+            normal_msg_div.append(story_node)
+
 
             let params = new URLSearchParams(document.location.search);
             let current_uuid = params.get("last_step");
@@ -171,14 +174,16 @@ let go_back_to_story = async (i) => {
     if (story_action_steps - (i + 1) > 0) {
         discard_button()
         for (k = 0; k < story_action_steps - (i + 1); k++) {
-            normal_msg_div.removeChild(normal_msg_div.getElementsByClassName('story-msg')[0]);
-            normal_msg_div.removeChild(normal_msg_div.getElementsByClassName('action-msg')[0]);
+            let stories = normal_msg_div.getElementsByClassName('story-msg')
+            normal_msg_div.removeChild(stories[stories.length - 1]);
+            let actions = normal_msg_div.getElementsByClassName('action-msg')
+            normal_msg_div.removeChild(actions[actions.length - 1]);
         }
     }
 
     
     const url = new URL(window.location.href);
-    url.searchParams.set('last_step', normal_msg_div.firstChild.dataset.uuid);
+    url.searchParams.set('last_step', normal_msg_div.lastChild.dataset.uuid);
 
     window.history.replaceState(null, document.title, url)
     await refresh_next_action_div()
@@ -190,12 +195,12 @@ let go_back_to_origin = async () => {
     if (normal_msg_div.childElementCount > 1) {
         let next_action_div = document.querySelector("#next-action-div")
         next_action_div.replaceChildren(normal_msg_div.children[normal_msg_div.childElementCount - 2])
-        normal_msg_div.replaceChildren(normal_msg_div.lastChild)
+        normal_msg_div.replaceChildren(normal_msg_div.firstChild)
     } else {
-        normal_msg_div.replaceChildren(normal_msg_div.lastChild)
+        normal_msg_div.replaceChildren(normal_msg_div.firstChild)
     }
 
-    window.history.replaceState(null, document.title, "/adventure/" + normal_msg_div.lastChild.dataset.uuid)
+    window.history.replaceState(null, document.title, "/adventure/" + normal_msg_div.firstChild.dataset.uuid)
     await refresh_next_action_div()
 }
 
@@ -207,18 +212,19 @@ let choose_action = async (i) => {
     let normal_msg_div = document.querySelector("#normal-messages-div")
     let next_action_div = document.querySelector("#next-action-div")
     next_action_div.children[i].removeAttribute("onclick")
-    normal_msg_div.prepend(next_action_div.children[i])
+    normal_msg_div.append(next_action_div.children[i])
     next_action_div.replaceChildren()
 
     let new_story = document.createElement("div")
     new_story.classList.add("story-msg")
-    new_story.innerText = normal_msg_div.firstChild.dataset.storytext
-    new_story.setAttribute("data-uuid", normal_msg_div.firstChild.dataset.uuid)
+    new_story.innerText = normal_msg_div.lastChild.dataset.storytext
+    new_story.setAttribute("data-uuid", normal_msg_div.lastChild.dataset.uuid)
     new_story.setAttribute("onclick", "go_back_to_story(" + (Math.ceil(normal_msg_div.childElementCount / 2 - 1)).toString() + ")")
-    normal_msg_div.prepend(new_story)
+    normal_msg_div.append(new_story)
+    new_story.scrollIntoView({ behavior: "smooth" })
 
     const url = new URL(window.location.href);
-    url.searchParams.set('last_step', normal_msg_div.firstChild.dataset.uuid);
+    url.searchParams.set('last_step', normal_msg_div.lastChild.dataset.uuid);
 
     window.history.replaceState(null, document.title, url)
     await refresh_next_action_div()
@@ -249,4 +255,9 @@ let create_adventure = async () => {
     } catch (error) {
         console.error(error.message);
     }
+}
+
+window.onload = function() {
+    let normal_msg_div = document.querySelector("#normal-messages-div")
+    normal_msg_div.lastChild.scrollIntoView(true);
 }

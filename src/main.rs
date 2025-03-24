@@ -503,11 +503,11 @@ async fn new_adventure() -> Result<impl IntoResponse, AppError> {
                     p contenteditable="plaintext-only" placeholder="Title..." { "" }
                 }
                 #messages-div {
-                    #control-panel {
-                        button #add-button title="Create" onclick="create_adventure()" { "Create" }
-                    }
                     #editing-messages-div {
                         ."story-msg" contenteditable="plaintext-only" placeholder="Once upon a time..." { "" }
+                    }
+                    #control-panel {
+                        button #add-button title="Create" onclick="create_adventure()" { "Create" }
                     }
                 }
             }
@@ -605,21 +605,21 @@ async fn adventure_story(
                     p { (adventure.title) }
                 }
                 #messages-div {
+                    #normal-messages-div {
+                        ."story-msg" onclick={"go_back_to_origin()"} data-uuid={ (adventure_key) } { (adventure.once_upon_a_time) }
+                        @for (i, (uuid, adventure_step)) in ((0..adventure_steps.len()).rev()).zip(adventure_steps.iter()).rev() {
+                            ."action-msg" data-uuid={ (uuid) } { (adventure_step.action) }
+                            ."story-msg" onclick={"go_back_to_story(" (i) ")"} data-uuid={ (uuid) } { (adventure_step.story) }
+                        }
+                        
+                    }
+                    #next-action-div {}
+                    #editing-messages-div {}
                     #control-panel {
                         button #add-button title="Extend" onclick="add_button()" { "Extend" }
                         button #edit-button title="Edit" onclick="edit_button()" { "Edit" }
                         button #discard-button title="Discard Edits" onclick="discard_button()" { "Discard Edits" }
                         button #save-button title="Save Edits" onclick="save_button()" { "Save Edits" }
-                    }
-                    #editing-messages-div {}
-                    #next-action-div {}
-                    #normal-messages-div {
-                        @for (i, (uuid, adventure_step)) in ((0..adventure_steps.len()).rev()).zip(adventure_steps.iter()) {
-                            ."story-msg" onclick={"go_back_to_story(" (i) ")"} data-uuid={ (uuid) } { (adventure_step.story) }
-                            ."action-msg" data-uuid={ (uuid) } { (adventure_step.action) }
-                        }
-
-                        ."story-msg" onclick={"go_back_to_origin()"} data-uuid={ (adventure_key) } { (adventure.once_upon_a_time) }
                     }
                 }
             }
