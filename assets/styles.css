@@ -124,6 +124,7 @@ body {
 #next-action-div {
   margin-top: 10px;
   margin-bottom: 0px;
+  min-height: 164px;
 }
 
 
@@ -139,13 +140,20 @@ body {
   cursor: pointer;
 }
 
-#next-action-div:empty, #editing-messages-div:empty {
+#next-action-div:has(+ hr) {
   margin: 0px;
+  min-height: 0px;
 }
 
 #editing-messages-div {
+  min-height: 164px;
   margin-top: 0px;
   margin-bottom: 0px;
+}
+
+#editing-messages-div:empty {
+  margin: 0px;
+  min-height: 0px;
 }
 
 .story-msg, .action-msg {
@@ -175,13 +183,13 @@ hr {
   max-height: 0px;
   color: rgb(202, 202, 202);
   border-style:dashed;
-  margin-top: 5px;
-  margin-bottom: 5px;
+  margin-top: 4px;
+  margin-bottom: 4px;
 }
 
 #control-panel {
   margin: auto;
-  margin-top: 100px;
+  margin-top: 45px;
   margin-bottom: 0px;
   height: 30px;
   flex-grow: 0;
@@ -327,7 +335,7 @@ hr {
 }
 
 #messages-div > :first-child {
-  margin-top: auto;
+  margin-top: calc(100dvh - 300px);
 }
 
 

@@ -31,7 +31,7 @@ let add_button = () => {
     let edit_div = document.querySelector("#editing-messages-div")
     if (editing_steps === 0) {
         let new_action = document.createElement("hr")
-        edit_div.after(new_action)
+        edit_div.before(new_action)
         let next_action_div = document.querySelector("#next-action-div")
         next_action_div.replaceChildren()
     }
@@ -61,6 +61,13 @@ let edit_button = () => {
 
 let discard_button = () => {
     if (editing_steps > 0) {
+        discard_editing()
+        refresh_next_action_div()
+    }
+}
+
+let discard_editing = () => {
+    if (editing_steps > 0) {
         let edit_div = document.querySelector("#editing-messages-div")
         let hr = document.querySelector("#messages-div > hr")
         hr.remove()
@@ -71,6 +78,7 @@ let discard_button = () => {
 
 
 let refresh_next_action_div = async () => {
+    discard_editing()
     let next_action_div = document.querySelector("#next-action-div")
     
     let params = new URLSearchParams(document.location.search);
@@ -172,7 +180,7 @@ let go_back_to_story = async (i) => {
     }
     let story_action_steps = (normal_msg_div.childElementCount - 1) / 2
     if (story_action_steps - (i + 1) > 0) {
-        discard_button()
+        discard_editing()
         for (k = 0; k < story_action_steps - (i + 1); k++) {
             let stories = normal_msg_div.getElementsByClassName('story-msg')
             normal_msg_div.removeChild(stories[stories.length - 1]);
@@ -190,7 +198,7 @@ let go_back_to_story = async (i) => {
 }
 
 let go_back_to_origin = async () => {
-    discard_button()
+    discard_editing()
     let normal_msg_div = document.querySelector("#normal-messages-div")
     if (normal_msg_div.childElementCount > 1) {
         let next_action_div = document.querySelector("#next-action-div")
