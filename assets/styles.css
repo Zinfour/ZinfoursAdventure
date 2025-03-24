@@ -226,8 +226,12 @@ hr {
   margin-bottom: auto;
   overflow: hidden;
   align-items: center;
+  margin-left: 10px;
 }
 
+#title-header > a {
+  width: 100px;
+}
 
 
 
