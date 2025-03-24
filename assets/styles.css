@@ -326,6 +326,10 @@ hr {
   border-bottom: 1px solid rgb(202, 202, 202);
 }
 
+#messages-div > :first-child {
+  margin-top: auto;
+}
+
 
 @media only screen and (max-width: 600px) {
   .story-msg, .action-msg {
