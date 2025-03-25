@@ -27,7 +27,7 @@
 
 let editing_steps = 0
 
-let add_button = () => {
+function add_button() {
     let edit_div = document.querySelector("#editing-messages-div")
     if (editing_steps === 0) {
         let new_action = document.createElement("hr")
@@ -54,19 +54,19 @@ let add_button = () => {
 }
 
 
-let edit_button = () => {
+function edit_button() {
 
 }
 
 
-let discard_button = () => {
+function discard_button() {
     if (editing_steps > 0) {
         discard_editing()
         refresh_next_action_div()
     }
 }
 
-let discard_editing = () => {
+function discard_editing() {
     if (editing_steps > 0) {
         let edit_div = document.querySelector("#editing-messages-div")
         let hr = document.querySelector("#messages-div > hr")
@@ -77,7 +77,7 @@ let discard_editing = () => {
 }
 
 
-let refresh_next_action_div = async () => {
+async function refresh_next_action_div() {
     discard_editing()
     let next_action_div = document.querySelector("#next-action-div")
     
@@ -113,22 +113,19 @@ let refresh_next_action_div = async () => {
     }
 }
 
-let save_button = async () => {
+async function save_button() {
     let editing_msg_div = document.querySelector("#editing-messages-div")
     if (editing_msg_div.childElementCount > 0) {
         let normal_msg_div = document.querySelector("#normal-messages-div")
         while (editing_msg_div.children.length > 0) {
 
-            editing_msg_div.firstChild.removeAttribute("contentEditable")
-            let action_text = editing_msg_div.firstChild.innerText
-            let action_node = editing_msg_div.firstChild
-            normal_msg_div.append(action_node)
+            let first_action = editing_msg_div.querySelector(".action-msg")
+            let action_text = first_action.innerText
+            let action_node = first_action
 
-            editing_msg_div.firstChild.removeAttribute("contentEditable")
-            editing_msg_div.firstChild.setAttribute("onclick", "go_back_to_story(" + (Math.ceil(normal_msg_div.childElementCount / 2 - 1)).toString() + ")")
-            let story_text = editing_msg_div.firstChild.innerText
-            let story_node = editing_msg_div.firstChild
-            normal_msg_div.append(story_node)
+            let first_story = editing_msg_div.querySelector(".story-msg")
+            let story_text = first_story.innerText
+            let story_node = first_story
 
 
             let params = new URLSearchParams(document.location.search);
@@ -163,7 +160,14 @@ let save_button = async () => {
                 action_node.dataset.uuid = json
             } catch (error) {
                 console.error(error.message);
+                return
             }
+
+            first_action.removeAttribute("contentEditable")
+            normal_msg_div.append(action_node)
+            first_story.removeAttribute("contentEditable")
+            first_story.setAttribute("onclick", "go_back_to_story(" + (Math.ceil(normal_msg_div.childElementCount / 2 - 1)).toString() + ")")
+            normal_msg_div.append(story_node)
         }
         editing_steps = 0
         let hr = document.querySelector("#messages-div > hr")
@@ -173,7 +177,7 @@ let save_button = async () => {
     }
 }
 
-let go_back_to_story = async (i) => {
+async function go_back_to_story(i) {
     let normal_msg_div = document.querySelector("#normal-messages-div")
     if (normal_msg_div.childElementCount % 2 == 0) {
         normal_msg_div.removeChild(normal_msg_div.getElementsByClassName('action-msg')[0]);
@@ -198,7 +202,7 @@ let go_back_to_story = async (i) => {
     await refresh_next_action_div()
 }
 
-let go_back_to_origin = async () => {
+async function go_back_to_origin() {
     if (document.querySelector("#normal-messages-div").childElementCount > 1) {
         document.querySelector("#next-action-div").replaceChildren()
     }
@@ -216,11 +220,11 @@ let go_back_to_origin = async () => {
     await refresh_next_action_div()
 }
 
-let add_adventure_button = () => {
+function add_adventure_button() {
     window.location.href = "/adventure/new"
 }
 
-let choose_action = async (i) => {
+async function choose_action(i) {
     let normal_msg_div = document.querySelector("#normal-messages-div")
     let next_action_div = document.querySelector("#next-action-div")
     next_action_div.children[i].removeAttribute("onclick")
@@ -242,7 +246,7 @@ let choose_action = async (i) => {
     await refresh_next_action_div()
 }
 
-let create_adventure = async () => {
+async function create_adventure() {
     let title_text = document.querySelector("#title-header > p")
     let once_upon_a_time_div = document.querySelector(".story-msg")
     try {
@@ -269,7 +273,17 @@ let create_adventure = async () => {
     }
 }
 
+function open_sidebar() {
+    document.getElementById("sidebar").style.width = "350px";
+}
+
+function close_sidebar() {
+    document.getElementById("sidebar").style.width = "0";
+}
+
 window.onload = function() {
     let normal_msg_div = document.querySelector("#normal-messages-div")
-    normal_msg_div.lastChild.scrollIntoView(true);
+    if (normal_msg_div != null) {
+        normal_msg_div.lastChild.scrollIntoView(true);
+    }
 }

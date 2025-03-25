@@ -93,6 +93,8 @@ struct AdventureStep {
     #[serde(default = "get_unix_time")]
     creation_time: u64,
     #[serde(default)]
+    hidden: bool,
+    #[serde(default)]
     item_vector: Vec<f64>, // TODO: use this to embed/rank stories and actions
 }
 
@@ -132,6 +134,8 @@ struct Adventure {
     views: usize,
     #[serde(default)]
     length: usize,
+    #[serde(default)]
+    hidden: bool,
     #[serde(default)]
     item_vector: Vec<f64>, // TODO: use this to embed/rank stories and actions
 }
@@ -296,6 +300,7 @@ async fn main() {
         //     ServeFile::new(assets_dir.join("directory.html")),
         // )
         .route("/adventure", get(directory))
+        .route("/adventure/about", get(about))
         .route("/adventure/new_step", post(new_step))
         .route("/adventure/new", get(new_adventure))
         .route("/adventure/submit_adventure", post(submit_adventure))
@@ -482,9 +487,36 @@ async fn main() {
 //     println!("Websocket context {who} destroyed");
 // }
 
-async fn new_adventure() -> Result<impl IntoResponse, AppError> {
-    let document = html! {
-        (DOCTYPE)
+fn header_and_sidebar(title: &str, editable: bool) -> PreEscaped<String> {
+    html! {
+        #sidebar {
+            a #close-button onclick="close_sidebar()" { "×" }
+            a href="/adventure/about" { "About" }
+            a href="https://discord.gg/xqkd9PCrgs" { "Discord" }
+            a href="https://zinfour.bsky.social" { "Bluesky" }
+            a href="https://twitter.com/zinfour_" { "Twitter" }
+            a href="https://www.patreon.com/Zinfour" { "Support the project ❤️" }
+        }
+        span #open-button onclick="open_sidebar()" {
+            "≡ ☰"
+        }
+        #title-header {
+            a href="/adventure" {
+                #logo-div {
+                    img #logo src="/logo.png" alt="Zinfour's Adventure logo";
+                }
+            }
+            @if editable {
+                p contenteditable="plaintext-only" placeholder=(title) { "" }
+            } @else {
+                p { (title) }
+            }
+        }
+    }
+}
+
+fn head() -> PreEscaped<String> {
+    html! {
         head {
             title { "Zinfour's Adventure" }
             link rel="stylesheet" href="/styles.css";
@@ -492,22 +524,26 @@ async fn new_adventure() -> Result<impl IntoResponse, AppError> {
             meta name="viewport" content="width=device-width, initial-scale=1.0";
             script src="/script.js" {};
         }
-        body {
-            #center-div {
-                #title-header {
-                    a href="/adventure" {
-                        #logo-div {
-                            img #logo src="/logo.png" alt="Zinfour's Adventure logo";
+    }
+}
+
+async fn new_adventure() -> Result<impl IntoResponse, AppError> {
+    let document = html! {
+        (DOCTYPE)
+        html lang="en" {
+            (head())
+            body {
+                (header_and_sidebar("Title...", true))
+                #center-div {
+                    #messages-div {
+                        #next-action-div {}
+                        hr;
+                        #editing-messages-div {
+                            ."story-msg" contenteditable="plaintext-only" placeholder="Once upon a time..." { "" }
                         }
-                    }
-                    p contenteditable="plaintext-only" placeholder="Title..." { "" }
-                }
-                #messages-div {
-                    #editing-messages-div {
-                        ."story-msg" contenteditable="plaintext-only" placeholder="Once upon a time..." { "" }
-                    }
-                    #control-panel {
-                        button #add-button title="Create" onclick="create_adventure()" { "Create" }
+                        #control-panel {
+                            button #add-button title="Create" onclick="create_adventure()" { "Create" }
+                        }
                     }
                 }
             }
@@ -529,7 +565,9 @@ async fn submit_adventure(
         return Err(AppError::BadRequestError("Title too long".to_string()));
     }
     if payload.once_upon_a_time.trim().is_empty() {
-        return Err(AppError::BadRequestError("Missing initial paragraph.".to_string()));
+        return Err(AppError::BadRequestError(
+            "Missing initial paragraph.".to_string(),
+        ));
     }
     let adventure_key = {
         let database = state.database.clone();
@@ -587,39 +625,28 @@ async fn adventure_story(
 
     let document = html! {
         (DOCTYPE)
-        head {
-            title { "Zinfour's Adventure" }
-            link rel="stylesheet" href="/styles.css";
-            link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source Serif Pro";
-            meta name="viewport" content="width=device-width, initial-scale=1.0";
-            script src="/script.js" {};
-        }
-        body {
-            #center-div {
-                #title-header {
-                    a href="/adventure" {
-                        #logo-div {
-                            img #logo src="/logo.png" alt="Zinfour's Adventure logo";
+        html lang="en" {
+            (head())
+            body {
+                (header_and_sidebar(&adventure.title, false))
+                #center-div {
+                    #messages-div {
+                        #normal-messages-div {
+                            ."story-msg" onclick={"go_back_to_origin()"} data-uuid={ (adventure_key) } { (adventure.once_upon_a_time) }
+                            @for (i, (uuid, adventure_step)) in ((0..adventure_steps.len()).rev()).zip(adventure_steps.iter()).rev() {
+                                ."action-msg" data-uuid={ (uuid) } { (adventure_step.action) }
+                                ."story-msg" onclick={"go_back_to_story(" (i) ")"} data-uuid={ (uuid) } { (adventure_step.story) }
+                            }
+
                         }
-                    }
-                    p { (adventure.title) }
-                }
-                #messages-div {
-                    #normal-messages-div {
-                        ."story-msg" onclick={"go_back_to_origin()"} data-uuid={ (adventure_key) } { (adventure.once_upon_a_time) }
-                        @for (i, (uuid, adventure_step)) in ((0..adventure_steps.len()).rev()).zip(adventure_steps.iter()).rev() {
-                            ."action-msg" data-uuid={ (uuid) } { (adventure_step.action) }
-                            ."story-msg" onclick={"go_back_to_story(" (i) ")"} data-uuid={ (uuid) } { (adventure_step.story) }
+                        #next-action-div {}
+                        #editing-messages-div {}
+                        #control-panel {
+                            button #add-button title="Extend" onclick="add_button()" { "Extend" }
+                            button #edit-button title="Edit" onclick="edit_button()" { "Edit" }
+                            button #discard-button title="Discard Edits" onclick="discard_button()" { "Discard Edits" }
+                            button #save-button title="Save Edits" onclick="save_button()" { "Save Edits" }
                         }
-                        
-                    }
-                    #next-action-div {}
-                    #editing-messages-div {}
-                    #control-panel {
-                        button #add-button title="Extend" onclick="add_button()" { "Extend" }
-                        button #edit-button title="Edit" onclick="edit_button()" { "Edit" }
-                        button #discard-button title="Discard Edits" onclick="discard_button()" { "Discard Edits" }
-                        button #save-button title="Save Edits" onclick="save_button()" { "Save Edits" }
                     }
                 }
             }
@@ -701,17 +728,15 @@ async fn directory(
                 all_adventures.push((k.value(), adv_val));
             }
             drop(read_txn);
-            
+
             let adventures = match query.sort_by {
-                None | Some(SortBy::TopAllTime) => {
-                    all_adventures
-                        .into_iter()
-                        .sorted_by_key(|(_, adv_val)| adv_val.views)
-                        .rev()
-                        .skip(items_per_page * page.saturating_sub(1))
-                        .take(items_per_page)
-                        .collect()
-                }
+                None | Some(SortBy::TopAllTime) => all_adventures
+                    .into_iter()
+                    .sorted_by_key(|(_, adv_val)| adv_val.views)
+                    .rev()
+                    .skip(items_per_page * page.saturating_sub(1))
+                    .take(items_per_page)
+                    .collect(),
                 Some(SortBy::TopThisYear) => {
                     let unix_time = get_unix_time();
                     all_adventures
@@ -783,14 +808,12 @@ async fn directory(
                         .take(items_per_page)
                         .collect()
                 }
-                Some(SortBy::Length) => {
-                    all_adventures
-                        .into_iter()
-                        .sorted_by_key(|(_, adv_val)| adv_val.length)
-                        .skip(items_per_page * page.saturating_sub(1))
-                        .take(items_per_page)
-                        .collect()
-                }
+                Some(SortBy::Length) => all_adventures
+                    .into_iter()
+                    .sorted_by_key(|(_, adv_val)| adv_val.length)
+                    .skip(items_per_page * page.saturating_sub(1))
+                    .take(items_per_page)
+                    .collect(),
                 Some(SortBy::Random) => {
                     all_adventures.shuffle(&mut rng());
                     all_adventures
@@ -799,15 +822,13 @@ async fn directory(
                         .take(items_per_page)
                         .collect()
                 }
-                Some(SortBy::New) => {
-                    all_adventures
-                        .into_iter()
-                        .sorted_by_key(|(_, adv_val)| adv_val.creation_time)
-                        .rev()
-                        .skip(items_per_page * page.saturating_sub(1))
-                        .take(items_per_page)
-                        .collect()
-                }
+                Some(SortBy::New) => all_adventures
+                    .into_iter()
+                    .sorted_by_key(|(_, adv_val)| adv_val.creation_time)
+                    .rev()
+                    .skip(items_per_page * page.saturating_sub(1))
+                    .take(items_per_page)
+                    .collect(),
             };
             Ok::<_, AppError>(adventures)
         })
@@ -828,15 +849,44 @@ async fn directory(
 
     let document = html! {
         (DOCTYPE)
-        head {
-            title { "Zinfour's Adventure" }
-            link rel="stylesheet" href="/styles.css";
-            link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source Serif Pro";
-            meta name="viewport" content="width=device-width, initial-scale=1.0";
-            script src="/script.js" {};
+        html lang="en" {
+            (head())
+            body {
+                (header_and_sidebar("Zinfour's Adventure", false))
+                #center-div {
+                    #story-list {
+                        #directory-settings {
+                            select #sort-by onchange="document.location.href=\"/adventure?sort_by=\" + this.value" {
+                                @for (sb, txt) in sort_by_options {
+                                    option value=(sb) selected[query.sort_by == Some(sb)] { (txt) }
+                                }
+                            }
+                        }
+                        #story-info-list {
+                            @for (uuid, adventure) in chosen_adventures {
+                                ."story-info" {
+                                    a href={ "/adventure/" (uuid) } { (adventure.title) }
+                                }
+                            }
+                        }
+                        #control-panel {
+                            button #add-button title="Create Adventure" onclick="add_adventure_button()" { "Create Adventure" }
+                        }
+                    }
+                }
+            }
         }
-        body {
-            #center-div {
+    };
+    Ok(document)
+}
+
+async fn about() -> Result<Markup, AppError> {
+    let document = html! {
+        (DOCTYPE)
+        html lang="en" {
+            (head())
+            body {
+                (header_and_sidebar("Zinfour's Adventure", false))
                 #title-header {
                     a href="/adventure" {
                         #logo-div {
@@ -845,23 +895,10 @@ async fn directory(
                     }
                     p { "Zinfour's Adventure" }
                 }
-                #story-list {
-                    #directory-settings {
-                        select #sort-by onchange="document.location.href=\"/adventure?sort_by=\" + this.value" {
-                            @for (sb, txt) in sort_by_options {
-                                option value=(sb) selected[query.sort_by == Some(sb)] { (txt) }
-                            }
-                        }
-                    }
-                    #story-info-list {
-                        @for (uuid, adventure) in chosen_adventures {
-                            ."story-info" {
-                                a href={ "/adventure/" (uuid) } { (adventure.title) }
-                            }
-                        }
-                    }
-                    #control-panel {
-                        button #add-button title="Create Adventure" onclick="add_adventure_button()" { "Create Adventure" }
+                #center-div {
+                    img #logo src="/logo.png" alt="Zinfour's Adventure logo";
+                    p {
+                        "Zinfour's Adventure is a... um... I forgot. Ah, Eto... Bleh!"
                     }
                 }
             }

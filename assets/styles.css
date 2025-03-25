@@ -45,6 +45,7 @@ table {
 
 :root {
   --title-header-height: 60px;
+  --bright-grey: rgb(202, 202, 202);
 }
 
 
@@ -62,8 +63,9 @@ body {
   margin-top: 0;
   margin-bottom: 0;
   max-width: 800px;
-  height: 100dvh;
-  border: 1px solid rgb(202, 202, 202);
+  height: calc(100dvh - var(--title-header-height));
+  border-left: 16px solid rgb(40, 45, 39);
+  border-right: 16px solid rgb(40, 45, 39);
   display: flex;
   justify-content: space-between;
   flex-direction: column;
@@ -149,14 +151,15 @@ body {
 }
 
 #editing-messages-div {
-  min-height: 164px;
+  flex-basis: 164px;
+  flex-shrink: 0;
   margin-top: 0px;
   margin-bottom: 0px;
 }
 
 #editing-messages-div:empty {
   margin: 0px;
-  min-height: 0px;
+  flex-basis: 0px;
 }
 
 .story-msg, .action-msg {
@@ -185,7 +188,7 @@ hr {
   flex-grow: 1;
   width: 100%;
   max-height: 0px;
-  color: rgb(202, 202, 202);
+  color: var(--bright-grey);
   border-style:dashed;
   margin-top: 4px;
   margin-bottom: 4px;
@@ -209,8 +212,8 @@ hr {
     rgba(22, 22, 22, 0) 94%,
     rgb(22, 22, 22));
   width: 100%;
-  height: calc(100% - (var(--title-header-height) + 1px));
-  top: calc(var(--title-header-height) + 1px);
+  height: 100%;
+  top: 0px;
   position: absolute;
   pointer-events: none;
 }
@@ -219,9 +222,9 @@ hr {
   height: var(--title-header-height);
   width: 100%;
   flex-shrink: 0;
-  border-bottom: 1px solid rgb(202, 202, 202);
   flex-direction: row;
   display: flex;
+  background-color: rgb(56, 52, 47);
 }
 
 #title-header > p {
@@ -234,11 +237,10 @@ hr {
   font-size: 30px;
   text-overflow: ellipsis;
   text-transform: capitalize;
-  margin-top: auto;
-  margin-bottom: auto;
+  margin: auto;
   overflow: hidden;
-  align-items: center;
-  margin-left: 10px;
+  align-self: center;
+  padding-right: var(--title-header-height);
 }
 
 #title-header > a {
@@ -272,14 +274,15 @@ hr {
 
 .story-info {
   min-height: 80px;
-  border-bottom: 1px solid rgb(202, 202, 202);
+  border-bottom: 16px solid rgb(40, 45, 39);
   padding: 10px;
 }
 
 #logo {
-  width: (var(--title-header-height) - 10px);
-  height: calc(var(--title-header-height) - 10px);
-  margin: 5px;
+  max-width: 512px;
+  width: calc(100% - 10px);
+  aspect-ratio: 1 / 1;
+  margin: auto;
 }
 
 #logo-div {
@@ -287,8 +290,7 @@ hr {
   height: var(--title-header-height);
   flex-grow: 0;
   flex-shrink: 0;
-  border-right: 1px solid rgb(202, 202, 202);;
-  margin-right: 10px;
+  padding: 5px;
 }
 
 [contenteditable="plaintext-only"]:empty:before {
@@ -310,22 +312,18 @@ hr {
   outline: none !important;
 }
 
-/* unvisited link */
 .story-info > a:link {
   color: rgb(241, 241, 241);
 }
 
-/* visited link */
 .story-info > a:visited {
-  color: rgb(202, 202, 202);
+  color: var(--bright-grey);
 }
 
-/* mouse over link */
 .story-info > a:hover {
   color: rgb(182, 182, 182);
 }
 
-/* selected link */
 .story-info > a:active {
   color: rgb(182, 182, 182);
 }
@@ -335,13 +333,72 @@ hr {
 }
 
 #directory-settings {
-  border-bottom: 1px solid rgb(202, 202, 202);
+  border-bottom: 16px solid rgb(40, 45, 39);
 }
 
 #messages-div > :first-child {
-  margin-top: calc(100dvh - 300px);
+  margin-top: calc(100dvh - var(--title-header-height) - 350px);
 }
 
+#open-button {
+  color: rgb(241, 241, 241);
+  font-family: "Source Serif Pro", "Apple Garamond", "Baskerville", "Libre Baskerville", "Droid Serif", "Times New Roman", "Times", serif, "Noto Emoji", "Quivira";
+  font-size:30px;
+  cursor: pointer;
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
+#sidebar {
+  height: 100%;
+  width: 0px;
+  position: fixed;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  background-color: rgb(74, 70, 58);
+  overflow-x: hidden;
+  transition: 0.3s;
+  padding-top: 60px;
+}
+
+#sidebar a {
+  color: rgb(241, 241, 241);
+  font-family: "Source Serif Pro", "Apple Garamond", "Baskerville", "Libre Baskerville", "Droid Serif", "Times New Roman", "Times", serif, "Noto Emoji", "Quivira";
+  padding: 8px 8px 8px 32px;
+  text-decoration: none;
+  font-size: 25px;
+  display: block;
+  white-space: pre;
+  cursor: pointer;
+}
+
+#sidebar a:hover {
+  color: rgb(182, 182, 182);
+}
+
+#sidebar #close-button {
+  position: absolute;
+  top: 0;
+  right: 25px;
+  font-size: 36px;
+  margin-left: 50px;
+}
+
+#center-div > p {
+  color: rgb(241, 241, 241);
+  font-family: "Source Serif Pro", "Apple Garamond", "Baskerville", "Libre Baskerville", "Droid Serif", "Times New Roman", "Times", serif, "Noto Emoji", "Quivira";
+  font-variant-numeric: oldstyle-nums;
+  font-weight: 600;
+  hyphens: auto;
+  word-break: break-word;
+  font-size: 30px;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  margin: auto;
+  text-align: center;
+}
 
 @media only screen and (max-width: 600px) {
   .story-msg, .action-msg {
