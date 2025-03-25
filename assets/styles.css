@@ -343,11 +343,11 @@ hr {
 #open-button {
   color: rgb(241, 241, 241);
   font-family: "Source Serif Pro", "Apple Garamond", "Baskerville", "Libre Baskerville", "Droid Serif", "Times New Roman", "Times", serif, "Noto Emoji", "Quivira";
-  font-size:30px;
+  font-size:60px;
   cursor: pointer;
   position: absolute;
   top: 0;
-  right: 0;
+  right: 27px;
 }
 
 #sidebar {
@@ -395,7 +395,6 @@ hr {
   word-break: break-word;
   font-size: 30px;
   text-overflow: ellipsis;
-  text-transform: capitalize;
   margin: auto;
   text-align: center;
 }

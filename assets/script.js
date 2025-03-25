@@ -273,12 +273,20 @@ async function create_adventure() {
     }
 }
 
-function open_sidebar() {
+function open_sidebar(e) {
+    e.stopPropagation()
+    console.log(1, this, e)
     document.getElementById("sidebar").style.width = "350px";
 }
 
-function close_sidebar() {
+function close_sidebar(e) {
+    e.stopPropagation()
+    console.log(2, this, e)
     document.getElementById("sidebar").style.width = "0";
+}
+
+function absorb_click(e) {
+    e.stopPropagation()
 }
 
 window.onload = function() {
@@ -286,4 +294,9 @@ window.onload = function() {
     if (normal_msg_div != null) {
         normal_msg_div.lastChild.scrollIntoView(true);
     }
+}
+
+window.onclick = function(e) {
+    console.log(3, this, e)
+    document.getElementById("sidebar").style.width = "0";
 }

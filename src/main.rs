@@ -489,16 +489,16 @@ async fn main() {
 
 fn header_and_sidebar(title: &str, editable: bool) -> PreEscaped<String> {
     html! {
-        #sidebar {
-            a #close-button onclick="close_sidebar()" { "×" }
+        #sidebar onclick="absorb_click(event)" {
+            a #close-button onclick="close_sidebar(event)" { "×" }
             a href="/adventure/about" { "About" }
             a href="https://discord.gg/xqkd9PCrgs" { "Discord" }
             a href="https://zinfour.bsky.social" { "Bluesky" }
             a href="https://twitter.com/zinfour_" { "Twitter" }
             a href="https://www.patreon.com/Zinfour" { "Support the project ❤️" }
         }
-        span #open-button onclick="open_sidebar()" {
-            "≡ ☰"
+        span #open-button onclick="open_sidebar(event)" {
+            "≡"
         }
         #title-header {
             a href="/adventure" {
@@ -639,7 +639,15 @@ async fn adventure_story(
                             }
 
                         }
-                        #next-action-div {}
+                        #next-action-div {
+                            @for (i, (step_uuid, step)) in get_children(&state.database, query.last_step.unwrap_or(adventure_key))
+                                .await?
+                                .into_iter()
+                                .enumerate()
+                            {
+                                ."action-msg" onclick={"choose_action(" (i) ")"} data-storytext=(step.story) data-uuid=(step_uuid) { (step.action) }
+                            }
+                        }
                         #editing-messages-div {}
                         #control-panel {
                             button #add-button title="Extend" onclick="add_button()" { "Extend" }
@@ -887,18 +895,10 @@ async fn about() -> Result<Markup, AppError> {
             (head())
             body {
                 (header_and_sidebar("Zinfour's Adventure", false))
-                #title-header {
-                    a href="/adventure" {
-                        #logo-div {
-                            img #logo src="/logo.png" alt="Zinfour's Adventure logo";
-                        }
-                    }
-                    p { "Zinfour's Adventure" }
-                }
                 #center-div {
                     img #logo src="/logo.png" alt="Zinfour's Adventure logo";
                     p {
-                        "Zinfour's Adventure is a... um... I forgot. Ah, Eto... Bleh!"
+                        "Zinfour's Adventure is a... um... I forgot. Ah, eto... Bleh!"
                     }
                 }
             }
