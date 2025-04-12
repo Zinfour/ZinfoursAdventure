@@ -53,12 +53,6 @@ function add_button() {
     editing_steps += 1
 }
 
-
-function edit_button() {
-
-}
-
-
 function discard_button() {
     if (editing_steps > 0) {
         discard_editing()
@@ -273,15 +267,25 @@ async function create_adventure() {
     }
 }
 
+function send_notification(text, is_warning) {
+    let notification_div = document.querySelector("#notification-div")
+    let new_notif = document.createElement("div")
+    if (is_warning) {
+        new_notif.classList.add("warning-notif")
+    } else {
+        new_notif.classList.add("info-notif")
+    }
+    new_notif.innerText = text
+    notification_div.prepend(new_notif)
+}
+
 function open_sidebar(e) {
     e.stopPropagation()
-    console.log(1, this, e)
     document.getElementById("sidebar").style.width = "350px";
 }
 
 function close_sidebar(e) {
     e.stopPropagation()
-    console.log(2, this, e)
     document.getElementById("sidebar").style.width = "0";
 }
 
@@ -297,6 +301,8 @@ window.onload = function() {
 }
 
 window.onclick = function(e) {
-    console.log(3, this, e)
-    document.getElementById("sidebar").style.width = "0";
+    let sidebar = document.getElementById("sidebar")
+    if (sidebar != null) {
+        sidebar.style.width = "0";
+    }
 }

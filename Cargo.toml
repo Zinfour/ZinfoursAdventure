@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = { version = "0.8", features = ["ws"] }
+axum = { version = "0.8", features = ["ws", "macros"] }
 axum-extra = { version = "0.10", features = ["typed-header"] }
 axum-macros = "0.5"
 axum-server = { version = "0.7", features = ["tls-rustls"] }
@@ -29,4 +29,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.13", features = ["serde", "v4"]}
 tower = "0.5"
-itertools = "0.14.0"
+itertools = "0.14"
+axum-login = "0.17"
+tower-sessions = "0.14"
+aws-lc-rs = "1.13"
+async-trait = "0.1"

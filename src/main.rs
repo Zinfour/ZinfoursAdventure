@@ -22,6 +22,8 @@ mod app_error;
 
 use {
     app_error::AppError,
+    async_trait::async_trait,
+    aws_lc_rs::digest::{digest, Context, Digest, SHA256},
     axum::{
         body::Bytes,
         extract::{
@@ -29,20 +31,23 @@ use {
             ws::{CloseFrame, Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
             Path, Query, Request, State,
         },
+        http::StatusCode,
         response::{IntoResponse, Redirect, Response},
         routing::{any, get, post, put},
-        Json, Router, ServiceExt,
+        Form, Json, Router, ServiceExt,
     },
     axum_extra::TypedHeader,
+    axum_login::{AuthManagerLayerBuilder, AuthSession, AuthUser, AuthnBackend, UserId},
     axum_server::tls_rustls::RustlsConfig,
     bincode::{deserialize, serialize},
-    futures::{sink::SinkExt, stream::StreamExt},
+    futures::{sink::SinkExt, stream::StreamExt, try_join},
     itertools::Itertools,
     maud::{html, Escaper, Markup, PreEscaped, Render, DOCTYPE},
     rand::{prelude::*, rng},
     redb::{
-        backends::InMemoryBackend, Database, Key, MultimapTableDefinition, ReadableTable,
-        ReadableTableMetadata, TableDefinition, TypeName, Value,
+        backends::{FileBackend, InMemoryBackend},
+        Database, Key, MultimapTableDefinition, ReadableTable, ReadableTableMetadata,
+        TableDefinition, TypeName, Value,
     },
     serde::{de::DeserializeOwned, Deserialize, Serialize},
     serde_inline_default::serde_inline_default,
@@ -65,13 +70,15 @@ use {
         services::ServeFile,
         trace::{DefaultMakeSpan, TraceLayer},
     },
+    tower_sessions::{MemoryStore, SessionManagerLayer},
     tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt},
     uuid::{uuid, Uuid},
 };
 
 const ADVENTURE_STEPS_TABLE: TableDefinition<Bincode<Uuid>, Bincode<AdventureStep>> =
     TableDefinition::new("adventure_steps");
-// const USERS_TABLE: TableDefinition<Bincode<Uuid>, Bincode<User>> = TableDefinition::new("users");
+const USERS_TABLE: TableDefinition<Bincode<String>, Bincode<UserData>> =
+    TableDefinition::new("users");
 const CHILDREN_TABLE: MultimapTableDefinition<Bincode<Uuid>, Bincode<Uuid>> =
     MultimapTableDefinition::new("children_links");
 // const USER_HISTORY_TABLE: MultimapTableDefinition<Bincode<Uuid>, Bincode<UserInteraction>> =
@@ -88,21 +95,119 @@ struct AdventureStep {
     parent: Uuid,
     #[serde(default)]
     views: u64,
+
+    // like views but decays by 50% every day
     #[serde(default)]
-    created_by: Uuid,
+    trending_views: u64,
+    #[serde(default)]
+    created_by: String,
     #[serde(default = "get_unix_time")]
     creation_time: u64,
     #[serde(default)]
     hidden: bool,
     #[serde(default)]
     item_vector: Vec<f64>, // TODO: use this to embed/rank stories and actions
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+struct UserData {
+    pw_hash: Vec<u8>,
+    pw_salt: Vec<u8>,
+    user_vector: Vec<f64>, // TODO: use this to embed/rank stories and actions
+}
+
+// Custom Debug implentation so that we never print the password.
+impl Debug for UserData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("User")
+            .field("pw_hash", &"_")
+            .field("pw_salt", &"_")
+            .field("user_vector", &self.user_vector)
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 struct User {
     username: String,
-    pw_hash: Vec<u8>,
-    user_vector: Vec<f64>, // TODO: use this to embed/rank stories and actions
+    user_data: UserData,
+}
+
+impl AuthUser for User {
+    type Id = String;
+
+    fn id(&self) -> Self::Id {
+        self.username.clone()
+    }
+
+    fn session_auth_hash(&self) -> &[u8] {
+        &self.user_data.pw_hash
+    }
+}
+
+#[derive(Clone, Deserialize)]
+struct Credentials {
+    username: String,
+    password: String,
+}
+
+#[async_trait]
+impl AuthnBackend for AppState {
+    type User = User;
+    type Credentials = Credentials;
+    type Error = AppError;
+
+    async fn authenticate(
+        &self,
+        Credentials { username, password }: Self::Credentials,
+    ) -> Result<Option<Self::User>, Self::Error> {
+        let database = self.database.clone();
+        spawn_blocking(move || {
+            let read_txn = database.begin_read()?;
+
+            let users_table = read_txn.open_table(USERS_TABLE)?;
+            let user_data = users_table
+                .get(&username)?
+                .ok_or(AppError::BadRequest("wrong credentials".to_string()))?
+                .value();
+
+            let mut ctx = Context::new(&SHA256);
+            ctx.update(&user_data.pw_salt);
+            ctx.update(&password.as_bytes());
+            let output = ctx.finish();
+            if output.as_ref() == user_data.pw_hash {
+                Ok(Some(User {
+                    username,
+                    user_data,
+                }))
+            } else {
+                Err(AppError::BadRequest("wrong credentials".to_string()))
+            }
+        })
+        .await?
+    }
+
+    async fn get_user(&self, username: &UserId<Self>) -> Result<Option<Self::User>, Self::Error> {
+        let database = self.database.clone();
+        let username = username.clone();
+        spawn_blocking(move || {
+            let read_txn = database.begin_read()?;
+
+            let users_table = read_txn.open_table(USERS_TABLE)?;
+            let user_data = users_table
+                .get(&username)?
+                .ok_or(AppError::BadRequest("wrong credentials".to_string()))?
+                .value();
+
+            Ok(Some(User {
+                username,
+                user_data,
+            }))
+        })
+        .await?
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PartialOrd, Ord, Eq)]
@@ -133,11 +238,15 @@ struct Adventure {
     #[serde(default)]
     views: usize,
     #[serde(default)]
+    trending_views: usize,
+    #[serde(default)]
     length: usize,
     #[serde(default)]
     hidden: bool,
     #[serde(default)]
     item_vector: Vec<f64>, // TODO: use this to embed/rank stories and actions
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -158,11 +267,13 @@ impl<T> Value for Bincode<T>
 where
     T: Debug + Serialize + for<'a> Deserialize<'a>,
 {
-    type SelfType<'a> = T
+    type SelfType<'a>
+        = T
     where
         Self: 'a;
 
-    type AsBytes<'a> = Vec<u8>
+    type AsBytes<'a>
+        = Vec<u8>
     where
         Self: 'a;
 
@@ -245,27 +356,32 @@ async fn main() {
     });
 
     // TODO: default cache size is 1GB, maybe test if that is fine.
-    // let database = Arc::new(Database::builder().create("./databases/zinfours_adventure_1.redb")?);
     let database = Arc::new(
         Database::builder()
-            .create_with_backend(InMemoryBackend::new())
+            .create("./databases/zinfours_adventure_database_1.redb")
             .unwrap(),
     );
+
+    let app_state = AppState {
+        database: database.clone(),
+    };
+
+    // Session layer.
+    let session_store = MemoryStore::default();
+    let session_layer = SessionManagerLayer::new(session_store);
+
+    // Auth service.
+    let auth_layer = AuthManagerLayerBuilder::new(app_state.clone(), session_layer).build();
+    // let database = Arc::new(
+    //     Database::builder()
+    //         .create_with_backend(InMemoryBackend::new())
+    //         .unwrap(),
+    // );
     {
         let write_txs = database.begin_write().unwrap();
         {
             write_txs.open_table(ADVENTURES_TABLE).unwrap();
-            // let mut users_table = write_txs.open_table(USERS_TABLE).unwrap();
-            // users_table
-            //     .insert(
-            //         UUID_ZERO,
-            //         User {
-            //             username: "Guest".to_string(),
-            //             user_vector: vec![],
-            //             pw_hash: vec![],
-            //         },
-            //     )
-            //     .unwrap();
+            write_txs.open_table(USERS_TABLE).unwrap();
             write_txs.open_table(ADVENTURE_STEPS_TABLE).unwrap();
             write_txs.open_multimap_table(CHILDREN_TABLE).unwrap();
         }
@@ -292,22 +408,24 @@ async fn main() {
     let app = Router::new()
         .route("/", get(|| async { Redirect::permanent("/adventure") }))
         .route_service(
-            "/adventure/directory",
+            "/adventureadventure/directory",
             get(|| async { Redirect::permanent("/adventure") }),
         )
-        // .route_service(
-        //     "/adventure",
-        //     ServeFile::new(assets_dir.join("directory.html")),
-        // )
-        .route("/adventure", get(directory))
-        .route("/adventure/about", get(about))
+        .route("/adventure", get(directory_page))
+        .route("/adventure/about", get(about_page))
         .route("/adventure/new_step", post(new_step))
-        .route("/adventure/new", get(new_adventure))
+        .route_service(
+            "/adventure/twitter_preview.png",
+            ServeFile::new(assets_dir.join("twitter_preview.png")),
+        )
+        .route("/adventure/login", post(login))
+        .route("/adventure/register", get(register_page))
+        .route("/adventure/register_account", post(register))
+        .route("/adventure/new", get(new_adventure_page))
         .route("/adventure/submit_adventure", post(submit_adventure))
-        .route("/adventure/step/{key}", get(step))
+        .route("/adventure/step/{key}", get(step_page))
         .route("/adventure/children/{key}", get(children))
         .route("/adventure/{key}", get(adventure_story))
-        // .route("/adventure/create_guest", get(create_guest))
         .route_service("/styles.css", ServeFile::new(assets_dir.join("styles.css")))
         .route_service("/script.js", ServeFile::new(assets_dir.join("script.js")))
         .route_service(
@@ -324,24 +442,50 @@ async fn main() {
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::default().include_headers(true)),
         )
-        .with_state(AppState { database });
+        .layer(auth_layer)
+        .with_state(app_state);
     // run it with hyper
-
-    let addr = SocketAddr::from(([192, 168, 1, 2], 443));
 
     // let addr = SocketAddr::from(([127, 0, 0, 1], 80));
     // let listener = tokio::net::TcpListener::bind("0.0.0.0:8800").await.unwrap();
     // let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     // tracing::debug!("listening on {}", listener.local_addr().unwrap());
 
-    axum_server::bind_rustls(addr, tls_config)
-        .serve(
+    let moderation_app = Router::new()
+        .route("/adventure/moderation", get(moderation))
+        .route("/adventure/moderation/hide_uuid", post(hide_uuid))
+        .route("/adventure/moderation/delete_uuid", post(delete_uuid))
+        // .route("/", get(|| async { Redirect::permanent("/adventure") }))
+        .route_service("/styles.css", ServeFile::new(assets_dir.join("styles.css")))
+        .route_service("/script.js", ServeFile::new(assets_dir.join("script.js")))
+        .route_service(
+            "/favicon.ico",
+            ServeFile::new(assets_dir.join("favicon.ico")),
+        )
+        .route_service("/logo.png", ServeFile::new(assets_dir.join("logo.png")))
+        // logging so we can see whats going on
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::default().include_headers(true)),
+        )
+        .with_state(AppState { database });
+
+    let addr = SocketAddr::from(([192, 168, 1, 2], 443));
+    let local_addr = SocketAddr::from(([127, 0, 0, 1], 1337));
+
+    let res = try_join!(
+        axum_server::bind_rustls(addr, tls_config).serve(
             ServiceExt::<Request>::into_make_service_with_connect_info::<SocketAddr>(
                 NormalizePathLayer::trim_trailing_slash().layer(app),
             ),
+        ),
+        axum_server::bind(local_addr).serve(
+            ServiceExt::<Request>::into_make_service_with_connect_info::<SocketAddr>(
+                NormalizePathLayer::trim_trailing_slash().layer(moderation_app),
+            ),
         )
-        .await
-        .unwrap();
+    );
+    res.unwrap();
     // axum::serve(
     //     listener,
     //     app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -491,6 +635,16 @@ fn header_and_sidebar(title: &str, editable: bool) -> PreEscaped<String> {
     html! {
         #sidebar onclick="absorb_click(event)" {
             a #close-button onclick="close_sidebar(event)" { "×" }
+
+            form action="/adventure/login" method="post" {
+                label { "username:" }
+                input type="text" name="username";
+                label { "password:" }
+                input type="password" name="password" autocomplete="current-password";
+                input type="submit" value="Submit";
+            }
+            a href="/adventure/register" { "Register a new account" }
+            hr;
             a href="/adventure/about" { "About" }
             a href="https://discord.gg/xqkd9PCrgs" { "Discord" }
             a href="https://zinfour.bsky.social" { "Bluesky" }
@@ -503,7 +657,7 @@ fn header_and_sidebar(title: &str, editable: bool) -> PreEscaped<String> {
         #title-header {
             a href="/adventure" {
                 #logo-div {
-                    img #logo src="/logo.png" alt="Zinfour's Adventure logo";
+                    img #logo src="/logo.png" alt="Zinfour's Adventure Database logo";
                 }
             }
             @if editable {
@@ -518,16 +672,38 @@ fn header_and_sidebar(title: &str, editable: bool) -> PreEscaped<String> {
 fn head() -> PreEscaped<String> {
     html! {
         head {
-            title { "Zinfour's Adventure" }
+            title { "Zinfour's Adventure Database" }
             link rel="stylesheet" href="/styles.css";
             link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source Serif Pro";
             meta name="viewport" content="width=device-width, initial-scale=1.0";
             script src="/script.js" {};
+
+            meta name="twitter:card" content="summary_large_image";
+            meta name="twitter:site" content="@zinfour_";
+            meta name="twitter:creator" content="@zinfour_";
+            meta name="twitter:title" content="Zinfour's Adventure Database";
+            meta name="twitter:description" content="a place to read and create interactive fiction";
+            meta name="twitter:image" content="https://zinfour.com/adventure/twitter_preview.png";
+
+
         }
     }
 }
 
-async fn new_adventure() -> Result<impl IntoResponse, AppError> {
+fn notifications() -> PreEscaped<String> {
+    html! {
+        #notification-div {
+            ."info-notif" {
+                "You did something wrong"
+            }
+            ."warning-notif" {
+                "Something went wrong!"
+            }
+        }
+    }
+}
+
+async fn new_adventure_page() -> Result<impl IntoResponse, AppError> {
     let document = html! {
         (DOCTYPE)
         html lang="en" {
@@ -559,13 +735,13 @@ async fn submit_adventure(
 ) -> Result<Json<Uuid>, AppError> {
     println!("\n\n{:?}\n", payload);
     if payload.title.trim().is_empty() {
-        return Err(AppError::BadRequestError("Missing title.".to_string()));
+        return Err(AppError::BadRequest("Missing title.".to_string()));
     }
     if payload.title.len() > 50 {
-        return Err(AppError::BadRequestError("Title too long".to_string()));
+        return Err(AppError::BadRequest("Title too long".to_string()));
     }
     if payload.once_upon_a_time.trim().is_empty() {
-        return Err(AppError::BadRequestError(
+        return Err(AppError::BadRequest(
             "Missing initial paragraph.".to_string(),
         ));
     }
@@ -651,7 +827,6 @@ async fn adventure_story(
                         #editing-messages-div {}
                         #control-panel {
                             button #add-button title="Extend" onclick="add_button()" { "Extend" }
-                            button #edit-button title="Edit" onclick="edit_button()" { "Edit" }
                             button #discard-button title="Discard Edits" onclick="discard_button()" { "Discard Edits" }
                             button #save-button title="Save Edits" onclick="save_button()" { "Save Edits" }
                         }
@@ -718,129 +893,84 @@ struct DirectoryQuery {
     page: Option<usize>,
 }
 
-async fn directory(
+fn directory_query_to_url(sort_by: Option<SortBy>, page: Option<usize>) -> String {
+    match (sort_by, page) {
+        (None, None) => format!("adventure"),
+        (None, Some(page)) => format!("adventure?page={}", page),
+        (Some(sort_by), None) => format!("adventure?sort_by={:?}", sort_by),
+        (Some(sort_by), Some(page)) => format!("adventure?sort_by={:?}&page={}", sort_by, page),
+    }
+}
+
+async fn directory_page(
     State(state): State<AppState>,
     Query(query): Query<DirectoryQuery>,
 ) -> Result<Markup, AppError> {
-    let page = query.page.unwrap_or(1);
-    let items_per_page = 10;
-    let chosen_adventures: Vec<(Uuid, Adventure)> = {
-        let database = state.database.clone();
-        spawn_blocking(move || {
-            let read_txn = database.begin_read()?;
-            let adventures_table = read_txn.open_table(ADVENTURES_TABLE)?;
-            let mut all_adventures = vec![];
-            for adventure in adventures_table.iter()? {
-                let (k, v) = adventure?;
-                let adv_val = v.value();
+    let current_page = query.page.unwrap_or(1);
+    let items_per_page = 15;
+    let database = state.database.clone();
+    let mut all_adventures = spawn_blocking(move || {
+        let read_txn = database.begin_read()?;
+        let adventures_table = read_txn.open_table(ADVENTURES_TABLE)?;
+        let mut all_adventures = vec![];
+        for adventure in adventures_table.iter()? {
+            let (k, v) = adventure?;
+            let adv_val = v.value();
+            if !adv_val.hidden {
                 all_adventures.push((k.value(), adv_val));
             }
-            drop(read_txn);
+        }
+        drop(read_txn);
 
-            let adventures = match query.sort_by {
-                None | Some(SortBy::TopAllTime) => all_adventures
-                    .into_iter()
-                    .sorted_by_key(|(_, adv_val)| adv_val.views)
-                    .rev()
-                    .skip(items_per_page * page.saturating_sub(1))
-                    .take(items_per_page)
-                    .collect(),
-                Some(SortBy::TopThisYear) => {
-                    let unix_time = get_unix_time();
-                    all_adventures
-                        .into_iter()
-                        .filter(|(_, adv_val)| {
-                            unix_time.saturating_sub(adv_val.creation_time)
-                                < 1000 * 60 * 60 * 24 * 365
-                        })
-                        .sorted_by_key(|(_, adv_val)| adv_val.views)
-                        .rev()
-                        .skip(items_per_page * page.saturating_sub(1))
-                        .take(items_per_page)
-                        .collect()
-                }
-                Some(SortBy::TopThisMonth) => {
-                    let unix_time = get_unix_time();
-                    all_adventures
-                        .into_iter()
-                        .filter(|(_, adv_val)| {
-                            unix_time.saturating_sub(adv_val.creation_time)
-                                < 1000 * 60 * 60 * 24 * 30
-                        })
-                        .sorted_by_key(|(_, adv_val)| adv_val.views)
-                        .rev()
-                        .skip(items_per_page * page.saturating_sub(1))
-                        .take(items_per_page)
-                        .collect()
-                }
-                Some(SortBy::TopThisWeek) => {
-                    let unix_time = get_unix_time();
-                    all_adventures
-                        .into_iter()
-                        .filter(|(_, adv_val)| {
-                            unix_time.saturating_sub(adv_val.creation_time)
-                                < 1000 * 60 * 60 * 24 * 7
-                        })
-                        .sorted_by_key(|(_, adv_val)| adv_val.views)
-                        .rev()
-                        .skip(items_per_page * page.saturating_sub(1))
-                        .take(items_per_page)
-                        .collect()
-                }
-                Some(SortBy::TopThisDay) => {
-                    let unix_time = get_unix_time();
-                    all_adventures
-                        .into_iter()
-                        .filter(|(_, adv_val)| {
-                            unix_time.saturating_sub(adv_val.creation_time) < 1000 * 60 * 60 * 24
-                        })
-                        .sorted_by_key(|(_, adv_val)| adv_val.views)
-                        .rev()
-                        .skip(items_per_page * page.saturating_sub(1))
-                        .take(items_per_page)
-                        .collect()
-                }
-                Some(SortBy::Trending) => {
-                    // Trending is sorted by views but with a halftime of 1 day.
-                    let unix_time = get_unix_time();
-                    all_adventures
-                        .into_iter()
-                        .sorted_by_key(|(_, adv_val)| {
-                            (adv_val.views as f64
-                                * (-(unix_time.saturating_sub(adv_val.creation_time) as f64
-                                    / (1000 * 60 * 60 * 24) as f64))
-                                    .exp2()) as u64
-                        })
-                        .rev()
-                        .skip(items_per_page * page.saturating_sub(1))
-                        .take(items_per_page)
-                        .collect()
-                }
-                Some(SortBy::Length) => all_adventures
-                    .into_iter()
-                    .sorted_by_key(|(_, adv_val)| adv_val.length)
-                    .skip(items_per_page * page.saturating_sub(1))
-                    .take(items_per_page)
-                    .collect(),
-                Some(SortBy::Random) => {
-                    all_adventures.shuffle(&mut rng());
-                    all_adventures
-                        .into_iter()
-                        .skip(items_per_page * page.saturating_sub(1))
-                        .take(items_per_page)
-                        .collect()
-                }
-                Some(SortBy::New) => all_adventures
-                    .into_iter()
-                    .sorted_by_key(|(_, adv_val)| adv_val.creation_time)
-                    .rev()
-                    .skip(items_per_page * page.saturating_sub(1))
-                    .take(items_per_page)
-                    .collect(),
-            };
-            Ok::<_, AppError>(adventures)
-        })
-        .await??
+        Ok::<_, AppError>(all_adventures)
+    })
+    .await??;
+
+    let number_of_pages = all_adventures.len().div_ceil(items_per_page);
+
+    match query.sort_by {
+        None | Some(SortBy::TopAllTime) => {
+            all_adventures.sort_by_key(|(_, adv_val)| -(adv_val.views as isize))
+        }
+        Some(SortBy::TopThisYear) => {
+            let unix_time = get_unix_time();
+            all_adventures.retain(|(_, adv_val)| {
+                unix_time.saturating_sub(adv_val.creation_time) < 1000 * 60 * 60 * 24 * 365
+            });
+            all_adventures.sort_by_key(|(_, adv_val)| -(adv_val.views as isize));
+        }
+        Some(SortBy::TopThisMonth) => {
+            let unix_time = get_unix_time();
+            all_adventures.retain(|(_, adv_val)| {
+                unix_time.saturating_sub(adv_val.creation_time) < 1000 * 60 * 60 * 24 * 30
+            });
+            all_adventures.sort_by_key(|(_, adv_val)| -(adv_val.views as isize));
+        }
+        Some(SortBy::TopThisWeek) => {
+            let unix_time = get_unix_time();
+            all_adventures.retain(|(_, adv_val)| {
+                unix_time.saturating_sub(adv_val.creation_time) < 1000 * 60 * 60 * 24 * 7
+            });
+            all_adventures.sort_by_key(|(_, adv_val)| -(adv_val.views as isize));
+        }
+        Some(SortBy::TopThisDay) => {
+            let unix_time = get_unix_time();
+            all_adventures.retain(|(_, adv_val)| {
+                unix_time.saturating_sub(adv_val.creation_time) < 1000 * 60 * 60 * 24
+            });
+            all_adventures.sort_by_key(|(_, adv_val)| -(adv_val.views as isize));
+        }
+        Some(SortBy::Trending) => {
+            // Trending is sorted by views but with a halftime of 1 day.
+            all_adventures.sort_by_key(|(_, adv_val)| -(adv_val.trending_views as isize));
+        }
+        Some(SortBy::Length) => {
+            all_adventures.sort_by_key(|(_, adv_val)| -(adv_val.length as isize));
+        }
+        Some(SortBy::Random) => all_adventures.shuffle(&mut rng()),
+        Some(SortBy::New) => {
+            all_adventures.sort_by_key(|(_, adv_val)| -(adv_val.creation_time as isize))
+        }
     };
 
     let sort_by_options = vec![
@@ -860,7 +990,8 @@ async fn directory(
         html lang="en" {
             (head())
             body {
-                (header_and_sidebar("Zinfour's Adventure", false))
+                (header_and_sidebar("Zinfour's Adventure Database", false))
+                (notifications())
                 #center-div {
                     #story-list {
                         #directory-settings {
@@ -869,9 +1000,30 @@ async fn directory(
                                     option value=(sb) selected[query.sort_by == Some(sb)] { (txt) }
                                 }
                             }
+                            @if current_page > 1 {
+                                a href=(directory_query_to_url(query.sort_by, Some(1))) { (1) }
+                            }
+                            @if current_page > 3 {
+                                a { "..." }
+                            }
+                            @if current_page > 2 {
+                                a href=(directory_query_to_url(query.sort_by, Some(current_page-1))) { (current_page-1) }
+                            }
+                            a href=(directory_query_to_url(query.sort_by, Some(current_page))) { (current_page) }
+                            @if (number_of_pages - current_page) > 1 {
+                                a href=(directory_query_to_url(query.sort_by, Some(current_page+1))) { (current_page+1) }
+                            }
+                            @if (number_of_pages - current_page) > 2 {
+                                a { "..." }
+                            }
+                            @if (number_of_pages - current_page) > 0 {
+                                a href=(directory_query_to_url(query.sort_by, Some(number_of_pages))) { (number_of_pages) }
+                            }
                         }
                         #story-info-list {
-                            @for (uuid, adventure) in chosen_adventures {
+                            @for (uuid, adventure) in all_adventures.into_iter()
+                                .skip(items_per_page * current_page.saturating_sub(1))
+                                .take(items_per_page) {
                                 ."story-info" {
                                     a href={ "/adventure/" (uuid) } { (adventure.title) }
                                 }
@@ -888,17 +1040,17 @@ async fn directory(
     Ok(document)
 }
 
-async fn about() -> Result<Markup, AppError> {
+async fn about_page() -> Result<Markup, AppError> {
     let document = html! {
         (DOCTYPE)
         html lang="en" {
             (head())
             body {
-                (header_and_sidebar("Zinfour's Adventure", false))
+                (header_and_sidebar("Zinfour's Adventure Database", false))
                 #center-div {
-                    img #logo src="/logo.png" alt="Zinfour's Adventure logo";
+                    img #logo src="/logo.png" alt="Zinfour's Adventure Database logo";
                     p {
-                        "Zinfour's Adventure is a... um... I forgot. Ah, eto... Bleh!"
+                        "Zinfour's Adventure Database is a... um... I forgot. Ah, eto... Bleh!"
                     }
                 }
             }
@@ -907,16 +1059,108 @@ async fn about() -> Result<Markup, AppError> {
     Ok(document)
 }
 
+async fn register_page(State(state): State<AppState>) -> Result<Markup, AppError> {
+    let document = html! {
+        (DOCTYPE)
+        html lang="en" {
+            (head())
+            body {
+                (header_and_sidebar("Zinfour's Adventure Database", false))
+                (notifications())
+                #center-div {
+                    form action="/adventure/register_account" method="post" {
+                        label { "username:" }
+                        input type="text" name="username";
+                        label { "password:" }
+                        input type="password" name="password" autocomplete="new-password";
+                        input type="submit" value="Create Account";
+                    }
+                }
+            }
+        }
+    };
+    Ok(document)
+}
+
+#[derive(Deserialize)]
+struct RegisterStruct {
+    username: String,
+    password: String,
+}
+
+// Custom Debug implentation so that we never print the password.
+impl Debug for RegisterStruct {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegisterStruct")
+            .field("username", &self.username)
+            .field("password", &"_")
+            .finish()
+    }
+}
+
+async fn register(
+    State(state): State<AppState>,
+    Form(register_struct): Form<RegisterStruct>,
+) -> Result<Redirect, AppError> {
+    let database = state.database.clone();
+    spawn_blocking(move || {
+        let write_txn = database.begin_write()?;
+        {
+            let mut users_table = write_txn.open_table(USERS_TABLE)?;
+            if users_table.get(&register_struct.username)?.is_some() {
+                Err(AppError::BadRequest(
+                    "Username is already taken.".to_string(),
+                ))?;
+            }
+            let salt: Vec<u8> = rng().random_iter().take(32).collect();
+
+            let mut ctx = Context::new(&SHA256);
+            ctx.update(&salt);
+            ctx.update(register_struct.password.as_bytes());
+            let output = ctx.finish();
+
+            users_table.insert(
+                register_struct.username,
+                UserData {
+                    pw_hash: output.as_ref().to_vec(),
+                    pw_salt: salt,
+                    user_vector: vec![],
+                },
+            )?;
+        }
+        write_txn.commit()?;
+        Ok::<_, AppError>(())
+    })
+    .await??;
+    Ok(Redirect::to("/"))
+}
+
+async fn login(
+    mut auth_session: AuthSession<AppState>,
+    Form(creds): Form<Credentials>,
+) -> Result<Redirect, AppError> {
+    let user = match auth_session.authenticate(creds.clone()).await? {
+        Some(user) => user,
+        None => Err(AppError::BadRequest(
+            "Wrong password or username".to_string(),
+        ))?,
+    };
+
+    auth_session.login(&user).await?;
+
+    Ok(Redirect::to("/"))
+}
+
 async fn new_step(
     State(state): State<AppState>,
     Json(payload): Json<AdventureStep>,
 ) -> Result<Json<Uuid>, AppError> {
     let new_step_uuid = Uuid::new_v4();
     if payload.action.len() > 100 {
-        return Err(AppError::BadRequestError("Too long action.".to_string()));
+        return Err(AppError::BadRequest("Too long action.".to_string()));
     }
     if payload.story.len() > 6000 {
-        return Err(AppError::BadRequestError("Too long story.".to_string()));
+        return Err(AppError::BadRequest("Too long story.".to_string()));
     }
     println!("{:?}", payload);
     {
@@ -944,7 +1188,7 @@ async fn new_step(
     Ok(Json(new_step_uuid))
 }
 
-async fn step(
+async fn step_page(
     Path(key): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<AdventureStep>, AppError> {
@@ -1033,18 +1277,102 @@ async fn get_children(
                     .get(uuid)?
                     .map(|v| v.value())
                     .ok_or("couln't find adventure step.")?;
-                all_children.push((uuid, step));
+                if !step.hidden {
+                    all_children.push((uuid, step));
+                }
             }
             let mut chosen_children = all_children
                 .choose_multiple_weighted(rng, 3, |(_, step)| step.views as f64 + 1.0)?
                 .cloned()
                 .collect::<Vec<_>>();
+            chosen_children.sort_by_key(|(_, z)| z.views);
             chosen_children.shuffle(rng);
             Ok::<_, AppError>(chosen_children)
         })
         .await??
     };
     Ok(children)
+}
+
+async fn moderation(State(state): State<AppState>) -> Result<Markup, AppError> {
+    let document = html! {
+        (DOCTYPE)
+        html lang="en" {
+            (head())
+            body {
+                // (header_and_sidebar("Zinfour's Adventure Database", false))
+                // (notifications())
+                #center-div {
+                    #moderation-div {
+                        form action="/adventure/moderation/hide_uuid" method="post" {
+                            label { "hide uuid:" }
+                            input type="text" name="uuid";
+                            input type="submit" value="Submit";
+                        }
+                        form action="/adventure/moderation/delete_uuid" method="post" {
+                            label { "delete uuid:" }
+                            input type="text" name="uuid";
+                            input type="submit" value="Submit";
+                        }
+                    }
+                }
+            }
+        }
+    };
+    Ok(document)
+}
+
+#[derive(Deserialize)]
+struct UuidStruct {
+    uuid: Uuid,
+}
+
+async fn hide_uuid(
+    State(state): State<AppState>,
+    Form(uuid): Form<UuidStruct>,
+) -> Result<Redirect, AppError> {
+    let database = state.database.clone();
+    spawn_blocking(move || {
+        let write_txn = database.begin_write()?;
+        {
+            let mut adventures_table = write_txn.open_table(ADVENTURES_TABLE)?;
+            let tmp = adventures_table.get(uuid.uuid)?.map(|p| p.value());
+            if let Some(mut adv) = tmp {
+                adv.hidden = true;
+                adventures_table.insert(uuid.uuid, adv)?;
+            }
+            let mut adventure_steps_table = write_txn.open_table(ADVENTURE_STEPS_TABLE)?;
+            let tmp = adventure_steps_table.get(uuid.uuid)?.map(|p| p.value());
+            if let Some(mut adv) = tmp {
+                adv.hidden = true;
+                adventure_steps_table.insert(uuid.uuid, adv)?;
+            }
+        }
+        write_txn.commit()?;
+        Ok::<_, AppError>(())
+    })
+    .await??;
+    Ok(Redirect::to("/"))
+}
+
+async fn delete_uuid(
+    State(state): State<AppState>,
+    Form(uuid): Form<UuidStruct>,
+) -> Result<Redirect, AppError> {
+    let database = state.database.clone();
+    spawn_blocking(move || {
+        let write_txn = database.begin_write()?;
+        {
+            let mut adventures_table = write_txn.open_table(ADVENTURES_TABLE)?;
+            adventures_table.remove(uuid.uuid)?;
+            let mut adventure_steps_table = write_txn.open_table(ADVENTURE_STEPS_TABLE)?;
+            adventure_steps_table.remove(uuid.uuid)?;
+        }
+        write_txn.commit()?;
+        Ok::<_, AppError>(())
+    })
+    .await??;
+    Ok(Redirect::to("/"))
 }
 
 // /// helper to print contents of messages to stdout. Has special treatment for Close.

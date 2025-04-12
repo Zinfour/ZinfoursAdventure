@@ -46,6 +46,7 @@ table {
 :root {
   --title-header-height: 60px;
   --bright-grey: rgb(202, 202, 202);
+  --text-color: rgb(241, 241, 241);
 }
 
 
@@ -54,7 +55,14 @@ table {
 
 
 body {
-  background-color: rgb(22, 22, 22)
+  background-color: rgb(22, 22, 22);
+
+  color: var(--text-color);
+  font-family: "Source Serif Pro", "Apple Garamond", "Baskerville", "Libre Baskerville", "Droid Serif", "Times New Roman", "Times", serif, "Noto Emoji", "Quivira";
+  font-variant-numeric: oldstyle-nums;
+  font-weight: 400;
+  hyphens: auto;
+  word-break: break-word;
 }
 
 #center-div {
@@ -163,12 +171,6 @@ body {
 }
 
 .story-msg, .action-msg {
-  color: rgb(241, 241, 241);
-  font-family: "Source Serif Pro", "Apple Garamond", "Baskerville", "Libre Baskerville", "Droid Serif", "Times New Roman", "Times", serif, "Noto Emoji", "Quivira";
-  font-variant-numeric: oldstyle-nums;
-  font-weight: 400;
-  hyphens: auto;
-  word-break: break-word;
   width: fit-content;
   padding-left: 10px;
   padding-right: 10px;
@@ -180,6 +182,7 @@ body {
   min-width: 20px;
   white-space: pre-wrap;
   scroll-margin-top: 100px;
+  scroll-margin-bottom: 100px;
   min-height: 32px;
 }
 
@@ -198,10 +201,15 @@ hr {
   margin: auto;
   margin-top: 45px;
   margin-bottom: 0px;
-  height: 30px;
+  flex-basis: 50px;
   flex-grow: 0;
   flex-shrink: 0;
-  z-index: 1;
+  z-index: 2;
+  flex-direction: row;
+  display: flex;
+  justify-content: center;
+  align-items: start;
+  overflow-y: hidden;
 }
 
 #messages-div::before {
@@ -228,12 +236,11 @@ hr {
 }
 
 #title-header > p {
-  color: rgb(241, 241, 241);
-  font-family: "Source Serif Pro", "Apple Garamond", "Baskerville", "Libre Baskerville", "Droid Serif", "Times New Roman", "Times", serif, "Noto Emoji", "Quivira";
-  font-variant-numeric: oldstyle-nums;
+  color: var(--text-color);
+  
   font-weight: 600;
-  hyphens: auto;
-  word-break: break-word;
+  
+  
   font-size: 30px;
   text-overflow: ellipsis;
   text-transform: capitalize;
@@ -241,6 +248,7 @@ hr {
   overflow: hidden;
   align-self: center;
   padding-right: var(--title-header-height);
+  text-align: center;
 }
 
 #title-header > a {
@@ -261,21 +269,18 @@ hr {
   overflow-y: scroll;
   scrollbar-width: none;
 
-
-  color: rgb(241, 241, 241);
-  font-family: "Source Serif Pro", "Apple Garamond", "Baskerville", "Libre Baskerville", "Droid Serif", "Times New Roman", "Times", serif, "Noto Emoji", "Quivira";
-  font-variant-numeric: oldstyle-nums;
-  font-weight: 400;
-  hyphens: auto;
-  word-break: break-word;
   font-size: 20px;
   line-height: 32px;
+  height: 100dvh;
 }
 
 .story-info {
-  min-height: 80px;
-  border-bottom: 16px solid rgb(40, 45, 39);
+  border-bottom: 4px solid rgb(40, 45, 39);
   padding: 10px;
+}
+
+.story-info:last-child {
+  border-bottom-width: 16px;
 }
 
 #logo {
@@ -283,6 +288,7 @@ hr {
   width: calc(100% - 10px);
   aspect-ratio: 1 / 1;
   margin: auto;
+  user-select: none;
 }
 
 #logo-div {
@@ -297,7 +303,7 @@ hr {
   content: attr(placeholder);
   pointer-events: none;
   display: block; /* For Firefox */
-  color: rgb(241, 241, 241);
+  color: var(--text-color);
   animation: flickerAnimation 5s infinite;
   animation-timing-function: ease;
 }
@@ -312,19 +318,19 @@ hr {
   outline: none !important;
 }
 
-.story-info > a:link {
-  color: rgb(241, 241, 241);
+#story-list a:link {
+  color: var(--text-color);
 }
 
-.story-info > a:visited {
+#story-list a:visited {
   color: var(--bright-grey);
 }
 
-.story-info > a:hover {
+#story-list a:hover {
   color: rgb(182, 182, 182);
 }
 
-.story-info > a:active {
+#story-list a:active {
   color: rgb(182, 182, 182);
 }
 
@@ -337,24 +343,28 @@ hr {
 }
 
 #messages-div > :first-child {
-  margin-top: calc(100dvh - var(--title-header-height) - 350px);
+  margin-top: calc(100dvh - var(--title-header-height) - 370px);
 }
 
 #open-button {
-  color: rgb(241, 241, 241);
-  font-family: "Source Serif Pro", "Apple Garamond", "Baskerville", "Libre Baskerville", "Droid Serif", "Times New Roman", "Times", serif, "Noto Emoji", "Quivira";
+  color: var(--text-color);
   font-size:60px;
   cursor: pointer;
   position: absolute;
   top: 0;
   right: 27px;
+  user-select: none;
+}
+
+#open-button:hover {
+  color: rgb(182, 182, 182);
 }
 
 #sidebar {
   height: 100%;
   width: 0px;
   position: fixed;
-  z-index: 1;
+  z-index: 4;
   top: 0;
   right: 0;
   background-color: rgb(74, 70, 58);
@@ -363,9 +373,8 @@ hr {
   padding-top: 60px;
 }
 
-#sidebar a {
-  color: rgb(241, 241, 241);
-  font-family: "Source Serif Pro", "Apple Garamond", "Baskerville", "Libre Baskerville", "Droid Serif", "Times New Roman", "Times", serif, "Noto Emoji", "Quivira";
+#sidebar > a {
+  color: var(--text-color);
   padding: 8px 8px 8px 32px;
   text-decoration: none;
   font-size: 25px;
@@ -378,25 +387,139 @@ hr {
   color: rgb(182, 182, 182);
 }
 
-#sidebar #close-button {
+#sidebar > #close-button {
+  font-size: 50px;
   position: absolute;
+  padding-top: 5px;
   top: 0;
-  right: 25px;
-  font-size: 36px;
-  margin-left: 50px;
+  right: 23px;
+  user-select: none;
 }
 
 #center-div > p {
-  color: rgb(241, 241, 241);
-  font-family: "Source Serif Pro", "Apple Garamond", "Baskerville", "Libre Baskerville", "Droid Serif", "Times New Roman", "Times", serif, "Noto Emoji", "Quivira";
-  font-variant-numeric: oldstyle-nums;
-  font-weight: 600;
-  hyphens: auto;
-  word-break: break-word;
+  color: var(--text-color);
   font-size: 30px;
   text-overflow: ellipsis;
   margin: auto;
   text-align: center;
+}
+
+#notification-div {
+  z-index: 3;
+  left: 0px;
+  right: 0px;
+  /* transform:translate(-50%, 0%); */
+  position: absolute;
+  flex-direction: column;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  pointer-events: none;
+  display: none;
+}
+
+.info-notif, .warning-notif {
+  color: var(--text-color);
+  text-align: justify;
+  
+  
+  
+  
+  padding-left: 10px;
+  padding-right: 10px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  border-radius: 10px;
+  font-size: 20px;
+  line-height: 32px;
+  min-width: 20px;
+  white-space: pre-wrap;
+  min-height: 32px;
+}
+
+.info-notif {
+  border: 3px solid rgb(243, 220, 11);
+  background-color: rgb(167, 124, 8);
+}
+
+.warning-notif {
+  border: 3px solid rgb(243, 38, 11);
+  background-color: rgb(167, 8, 8);
+}
+
+#control-panel > button {
+  background-color: rgb(29, 32, 20);
+  border: 3px solid rgb(128, 157, 19);
+
+  color: var(--text-color);
+  text-align: justify;
+  
+  
+  
+  
+  padding-left: 10px;
+  padding-right: 10px;
+  padding-top: 5px;
+  padding-bottom: 20px;
+  border-radius: 10px;
+  font-size: 20px;
+  line-height: 32px;
+  min-width: 20px;
+  white-space: pre-wrap;
+  min-height: 32px;
+  border-bottom: none;
+  border-bottom-right-radius: 0px;
+  border-bottom-left-radius: 0px;
+  margin-top: 10px;
+  transition: margin-top 0.1s;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  #control-panel > button:hover {
+    margin-top: 0px;
+  }
+}
+
+#control-panel > button:active {
+  filter: brightness(90%);
+}
+
+#story-info-list {
+  margin-bottom: auto;
+}
+
+select {
+  background-color: rgb(29, 32, 20);
+  border: 3px solid rgb(128, 157, 19);
+  color: var(--text-color);
+  text-align: justify;
+  
+  
+  
+  
+  padding-left: 10px;
+  padding-right: 10px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  border-radius: 10px;
+  font-size: 20px;
+  line-height: 32px;
+  min-width: 20px;
+  white-space: pre-wrap;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+#directory-settings {
+  padding: 10px;
+}
+
+#moderation-div {
+  margin: 10px;
+  gap: 10px;
+  display: flex;
+  flex-direction: column;
 }
 
 @media only screen and (max-width: 600px) {
