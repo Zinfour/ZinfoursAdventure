@@ -693,12 +693,12 @@ fn head() -> PreEscaped<String> {
 fn notifications() -> PreEscaped<String> {
     html! {
         #notification-div {
-            ."info-notif" {
-                "You did something wrong"
-            }
-            ."warning-notif" {
-                "Something went wrong!"
-            }
+            // ."info-notif" {
+            //     "You did something wrong"
+            // }
+            // ."warning-notif" {
+            //     "Something went wrong!"
+            // }
         }
     }
 }
@@ -710,6 +710,7 @@ async fn new_adventure_page() -> Result<impl IntoResponse, AppError> {
             (head())
             body {
                 (header_and_sidebar("Title...", true))
+                (notifications())
                 #center-div {
                     #messages-div {
                         #next-action-div {}
@@ -733,7 +734,6 @@ async fn submit_adventure(
     State(state): State<AppState>,
     Json(payload): Json<Adventure>,
 ) -> Result<Json<Uuid>, AppError> {
-    println!("\n\n{:?}\n", payload);
     if payload.title.trim().is_empty() {
         return Err(AppError::BadRequest("Missing title.".to_string()));
     }

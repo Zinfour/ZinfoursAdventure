@@ -84,7 +84,8 @@ async function refresh_next_action_div() {
     try {
         const response = await fetch("/adventure/children/" + current_uuid);
         if (!response.ok) {
-            throw new Error(`Response status: ${response.status}`);
+            send_notification(await response.text(), false)
+            return
         }
 
         const json = await response.json();
@@ -141,7 +142,8 @@ async function save_button() {
                     }),
                 });
                 if (!response.ok) {
-                    throw new Error(`Response status: ${response.status}`);
+                    send_notification(await response.text(), false)
+                    return
                 }
 
                 const json = await response.json();
@@ -255,7 +257,8 @@ async function create_adventure() {
             }),
         });
         if (!response.ok) {
-            throw new Error(`Response status: ${response.status}`);
+            send_notification(await response.text(), false)
+            return
         }
 
         const json = await response.json();
@@ -277,6 +280,13 @@ function send_notification(text, is_warning) {
     }
     new_notif.innerText = text
     notification_div.prepend(new_notif)
+
+    setTimeout(() => {
+        notification_div.removeChild(new_notif)
+    }, 3000);
+    setTimeout(() => {
+        new_notif.style.opacity = "0"
+    }, 2000);
 }
 
 function open_sidebar(e) {
