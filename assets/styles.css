@@ -47,6 +47,7 @@ table {
   --title-header-height: 60px;
   --bright-grey: rgb(202, 202, 202);
   --text-color: rgb(241, 241, 241);
+  --disabled-text-color: rgb(102, 102, 102);
 }
 
 
@@ -437,8 +438,7 @@ hr {
   white-space: pre-wrap;
   min-height: 32px;
   
-  transition:
-    opacity 1.0s,
+  transition: opacity 1.0s;
 }
 
 .info-notif {
@@ -479,14 +479,21 @@ hr {
   cursor: pointer;
 }
 
+#control-panel > button:hover:enabled {
+  border-color: rgb(157, 180, 36);
+}
+
 @media (hover: hover) {
-  #control-panel > button:hover {
+  #control-panel > button:hover:enabled {
     margin-top: 0px;
   }
 }
 
-#control-panel > button:active {
-  filter: brightness(90%);
+#control-panel > button:disabled {
+  background-color: rgb(29, 30, 23);
+  border-color: rgb(114, 124, 74);
+  cursor: initial;
+  color: var(--disabled-text-color);
 }
 
 #story-info-list {

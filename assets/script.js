@@ -51,6 +51,14 @@ function add_button() {
     edit_div.append(new_story)
 
     editing_steps += 1
+    
+    let add_button = document.querySelector("#add-button")
+    let discard_button = document.querySelector("#discard-button")
+    let save_button = document.querySelector("#save-button")
+
+    add_button.setAttribute("disabled", "")
+    discard_button.removeAttribute("disabled")
+    save_button.removeAttribute("disabled")
 }
 
 function discard_button() {
@@ -58,6 +66,13 @@ function discard_button() {
         discard_editing()
         refresh_next_action_div()
     }
+    let add_button = document.querySelector("#add-button")
+    let discard_button = document.querySelector("#discard-button")
+    let save_button = document.querySelector("#save-button")
+
+    add_button.removeAttribute("disabled")
+    discard_button.setAttribute("disabled", "")
+    save_button.setAttribute("disabled", "")
 }
 
 function discard_editing() {
@@ -171,6 +186,13 @@ async function save_button() {
 
         await refresh_next_action_div()
     }
+    let add_button = document.querySelector("#add-button")
+    let discard_button = document.querySelector("#discard-button")
+    let save_button = document.querySelector("#save-button")
+
+    add_button.removeAttribute("disabled")
+    discard_button.setAttribute("disabled", "")
+    save_button.setAttribute("disabled", "")
 }
 
 async function go_back_to_story(i) {

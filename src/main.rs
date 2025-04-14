@@ -16,6 +16,7 @@
 //! cargo run -p example-websockets --bin example-client
 //! ```
 #![feature(let_chains)]
+#![feature(duration_constructors)]
 #![allow(unused_imports)]
 // #![allow(dead_code)]
 mod app_error;
@@ -31,7 +32,7 @@ use {
             ws::{CloseFrame, Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
             Path, Query, Request, State,
         },
-        http::StatusCode,
+        http::{uri::Authority, StatusCode},
         response::{IntoResponse, Redirect, Response},
         routing::{any, get, post, put},
         Form, Json, Router, ServiceExt,
@@ -70,7 +71,7 @@ use {
         services::ServeFile,
         trace::{DefaultMakeSpan, TraceLayer},
     },
-    tower_sessions::{MemoryStore, SessionManagerLayer},
+    tower_sessions::{Expiry, MemoryStore, SessionManagerLayer},
     tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt},
     uuid::{uuid, Uuid},
 };
@@ -320,14 +321,14 @@ fn get_unix_time() -> u64 {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                format!("{}=debug,tower_http=debug", env!("CARGO_CRATE_NAME")).into()
-            }),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    // tracing_subscriber::registry()
+    //     .with(
+    //         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+    //             format!("{}=debug,tower_http=debug", env!("CARGO_CRATE_NAME")).into()
+    //         }),
+    //     )
+    //     .with(tracing_subscriber::fmt::layer())
+    //     .init();
 
     let governor_conf = Arc::new(
         GovernorConfigBuilder::default()
@@ -351,7 +352,6 @@ async fn main() {
     // a separate background task to clean up
     std::thread::spawn(move || loop {
         std::thread::sleep(interval);
-        tracing::info!("rate limiting storage size: {}", governor_limiter.len());
         governor_limiter.retain_recent();
     });
 
@@ -367,11 +367,15 @@ async fn main() {
     };
 
     // Session layer.
-    let session_store = MemoryStore::default();
-    let session_layer = SessionManagerLayer::new(session_store);
+    let session_layer = SessionManagerLayer::new(MemoryStore::default());
 
     // Auth service.
     let auth_layer = AuthManagerLayerBuilder::new(app_state.clone(), session_layer).build();
+
+    let session_layer = SessionManagerLayer::new(MemoryStore::default())
+        .with_expiry(Expiry::OnInactivity(
+            tower_sessions::cookie::time::Duration::weeks(2),
+        ));
     // let database = Arc::new(
     //     Database::builder()
     //         .create_with_backend(InMemoryBackend::new())
@@ -419,6 +423,7 @@ async fn main() {
             ServeFile::new(assets_dir.join("twitter_preview.png")),
         )
         .route("/adventure/login", post(login))
+        .route("/adventure/logout", post(logout))
         .route("/adventure/register", get(register_page))
         .route("/adventure/register_account", post(register))
         .route("/adventure/new", get(new_adventure_page))
@@ -437,13 +442,14 @@ async fn main() {
         .layer(GovernorLayer {
             config: governor_conf,
         })
+        .layer(auth_layer)
+        .layer(session_layer)
+        .with_state(app_state)
         // logging so we can see whats going on
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::default().include_headers(true)),
-        )
-        .layer(auth_layer)
-        .with_state(app_state);
+        );
     // run it with hyper
 
     // let addr = SocketAddr::from(([127, 0, 0, 1], 80));
@@ -631,19 +637,24 @@ async fn main() {
 //     println!("Websocket context {who} destroyed");
 // }
 
-fn header_and_sidebar(title: &str, editable: bool) -> PreEscaped<String> {
+fn header_and_sidebar(title: &str, editable: bool, user: Option<User>) -> PreEscaped<String> {
     html! {
         #sidebar onclick="absorb_click(event)" {
             a #close-button onclick="close_sidebar(event)" { "×" }
 
-            form action="/adventure/login" method="post" {
-                label { "username:" }
-                input type="text" name="username";
-                label { "password:" }
-                input type="password" name="password" autocomplete="current-password";
-                input type="submit" value="Submit";
+            @if let Some(user) = user {
+                p { (user.username) }
+                a href="/adventure/logout" { "Logout" }
+            } @else {
+                form action="/adventure/login" method="post" {
+                    label { "username:" }
+                    input type="text" name="username";
+                    label { "password:" }
+                    input type="password" name="password" autocomplete="current-password";
+                    input type="submit" value="Login";
+                }
+                a href="/adventure/register" { "Register a new account" }
             }
-            a href="/adventure/register" { "Register a new account" }
             hr;
             a href="/adventure/about" { "About" }
             a href="https://discord.gg/xqkd9PCrgs" { "Discord" }
@@ -703,13 +714,15 @@ fn notifications() -> PreEscaped<String> {
     }
 }
 
-async fn new_adventure_page() -> Result<impl IntoResponse, AppError> {
+async fn new_adventure_page(
+    auth_session: AuthSession<AppState>,
+) -> Result<impl IntoResponse, AppError> {
     let document = html! {
         (DOCTYPE)
         html lang="en" {
             (head())
             body {
-                (header_and_sidebar("Title...", true))
+                (header_and_sidebar("Title...", true, auth_session.user))
                 (notifications())
                 #center-div {
                     #messages-div {
@@ -770,6 +783,7 @@ struct AdventureStoryQuery {
 }
 
 async fn adventure_story(
+    auth_session: AuthSession<AppState>,
     Path(key): Path<String>,
     State(state): State<AppState>,
     Query(query): Query<AdventureStoryQuery>,
@@ -804,7 +818,7 @@ async fn adventure_story(
         html lang="en" {
             (head())
             body {
-                (header_and_sidebar(&adventure.title, false))
+                (header_and_sidebar(&adventure.title, false, auth_session.user))
                 #center-div {
                     #messages-div {
                         #normal-messages-div {
@@ -827,8 +841,8 @@ async fn adventure_story(
                         #editing-messages-div {}
                         #control-panel {
                             button #add-button title="Extend" onclick="add_button()" { "Extend" }
-                            button #discard-button title="Discard Edits" onclick="discard_button()" { "Discard Edits" }
-                            button #save-button title="Save Edits" onclick="save_button()" { "Save Edits" }
+                            button #discard-button title="Discard" onclick="discard_button()" disabled { "Discard" }
+                            button #save-button title="Save" onclick="save_button()" disabled { "Save" }
                         }
                     }
                 }
@@ -903,6 +917,7 @@ fn directory_query_to_url(sort_by: Option<SortBy>, page: Option<usize>) -> Strin
 }
 
 async fn directory_page(
+    auth_session: AuthSession<AppState>,
     State(state): State<AppState>,
     Query(query): Query<DirectoryQuery>,
 ) -> Result<Markup, AppError> {
@@ -990,7 +1005,7 @@ async fn directory_page(
         html lang="en" {
             (head())
             body {
-                (header_and_sidebar("Zinfour's Adventure Database", false))
+                (header_and_sidebar("Zinfour's Adventure Database", false, auth_session.user))
                 (notifications())
                 #center-div {
                     #story-list {
@@ -1040,13 +1055,13 @@ async fn directory_page(
     Ok(document)
 }
 
-async fn about_page() -> Result<Markup, AppError> {
+async fn about_page(auth_session: AuthSession<AppState>) -> Result<Markup, AppError> {
     let document = html! {
         (DOCTYPE)
         html lang="en" {
             (head())
             body {
-                (header_and_sidebar("Zinfour's Adventure Database", false))
+                (header_and_sidebar("Zinfour's Adventure Database", false, auth_session.user))
                 #center-div {
                     img #logo src="/logo.png" alt="Zinfour's Adventure Database logo";
                     p {
@@ -1059,13 +1074,13 @@ async fn about_page() -> Result<Markup, AppError> {
     Ok(document)
 }
 
-async fn register_page(State(state): State<AppState>) -> Result<Markup, AppError> {
+async fn register_page(auth_session: AuthSession<AppState>) -> Result<Markup, AppError> {
     let document = html! {
         (DOCTYPE)
         html lang="en" {
             (head())
             body {
-                (header_and_sidebar("Zinfour's Adventure Database", false))
+                (header_and_sidebar("Zinfour's Adventure Database", false, auth_session.user))
                 (notifications())
                 #center-div {
                     form action="/adventure/register_account" method="post" {
@@ -1147,6 +1162,12 @@ async fn login(
     };
 
     auth_session.login(&user).await?;
+
+    Ok(Redirect::to("/"))
+}
+
+async fn logout(mut auth_session: AuthSession<AppState>) -> Result<Redirect, AppError> {
+    auth_session.logout().await?;
 
     Ok(Redirect::to("/"))
 }
@@ -1294,32 +1315,38 @@ async fn get_children(
     Ok(children)
 }
 
-async fn moderation(State(state): State<AppState>) -> Result<Markup, AppError> {
-    let document = html! {
-        (DOCTYPE)
-        html lang="en" {
-            (head())
-            body {
-                // (header_and_sidebar("Zinfour's Adventure Database", false))
-                // (notifications())
-                #center-div {
-                    #moderation-div {
-                        form action="/adventure/moderation/hide_uuid" method="post" {
-                            label { "hide uuid:" }
-                            input type="text" name="uuid";
-                            input type="submit" value="Submit";
-                        }
-                        form action="/adventure/moderation/delete_uuid" method="post" {
-                            label { "delete uuid:" }
-                            input type="text" name="uuid";
-                            input type="submit" value="Submit";
+async fn moderation(auth_session: AuthSession<AppState>) -> Result<Markup, AppError> {
+    if let Some(user) = &auth_session.user
+        && user.username == "zinfour"
+    {
+        let document = html! {
+            (DOCTYPE)
+            html lang="en" {
+                (head())
+                body {
+                    (header_and_sidebar("Zinfour's Adventure Database", false, auth_session.user))
+                    (notifications())
+                    #center-div {
+                        #moderation-div {
+                            form action="/adventure/moderation/hide_uuid" method="post" {
+                                label { "hide uuid:" }
+                                input type="text" name="uuid";
+                                input type="submit" value="Submit";
+                            }
+                            form action="/adventure/moderation/delete_uuid" method="post" {
+                                label { "delete uuid:" }
+                                input type="text" name="uuid";
+                                input type="submit" value="Submit";
+                            }
                         }
                     }
                 }
             }
-        }
-    };
-    Ok(document)
+        };
+        Ok(document)
+    } else {
+        Err(AppError::BadRequest("only zinfour allowed".to_string()))
+    }
 }
 
 #[derive(Deserialize)]
