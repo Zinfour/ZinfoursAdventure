@@ -29,6 +29,7 @@ let editing_steps = 0
 
 function add_button() {
     let edit_div = document.querySelector("#editing-messages-div")
+    let messages_div = document.querySelector("#messages-div")
     if (editing_steps === 0) {
         let new_action = document.createElement("hr")
         edit_div.before(new_action)
@@ -48,6 +49,32 @@ function add_button() {
     new_story.textContent = ""
     new_story.setAttribute("placeholder", "You do that...")
     new_story.contentEditable = "plaintext-only"
+    
+    const container = messages_div
+    const editableDiv = new_story
+
+    function ensureVisibleScroll() {
+        // Get current selection
+        const selection = window.getSelection();
+        if (!selection.rangeCount) return;
+
+        const range = selection.getRangeAt(0);
+        const selectedRect = range.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+
+        // Check if the cursor is near the bottom of the visible area
+        const distanceFromBottom = containerRect.bottom - selectedRect.bottom;
+        
+
+        if (distanceFromBottom < 60) {
+            // Scroll just enough to keep the cursor visible
+            const scrollAmount = 60 - distanceFromBottom;
+            container.scrollTop += scrollAmount;
+        }
+    }
+
+    editableDiv.addEventListener('input', ensureVisibleScroll);
+
     edit_div.append(new_story)
 
     editing_steps += 1
@@ -177,7 +204,6 @@ async function save_button() {
             first_action.removeAttribute("contentEditable")
             normal_msg_div.append(action_node)
             first_story.removeAttribute("contentEditable")
-            first_story.setAttribute("onclick", "go_back_to_story(" + (Math.ceil(normal_msg_div.childElementCount / 2 - 1)).toString() + ")")
             normal_msg_div.append(story_node)
         }
         editing_steps = 0
@@ -216,8 +242,40 @@ async function go_back_to_story(i) {
     const url = new URL(window.location.href);
     url.searchParams.set('last_step', normal_msg_div.lastChild.dataset.uuid);
 
-    window.history.replaceState(null, document.title, url)
+    window.history.replaceState(null, document.title, url);
     await refresh_next_action_div()
+}
+
+async function link_to_adventure_step(uuid) {
+    const url = new URL(window.location.href);
+    navigator.clipboard.writeText(url.origin + url.pathname + "?last_step=" + toString(uuid));
+    send_notification("copied link to clipboard", false)
+}
+
+async function delete_adventure_step(i, uuid) {
+    try {
+        const response = await fetch("/adventure/delete", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                uuid: uuid,
+            }),
+        });
+        if (!response.ok) {
+            send_notification(await response.text(), false)
+            return
+        }
+    } catch (error) {
+        console.error(error.message);
+        return
+    }
+    if (i == 0) {
+        await go_back_to_origin()
+    } else {
+        await go_back_to_story(i - 1)
+    }
 }
 
 async function go_back_to_origin() {
@@ -253,7 +311,6 @@ async function choose_action(i) {
     new_story.classList.add("story-msg")
     new_story.innerText = normal_msg_div.lastChild.dataset.storytext
     new_story.setAttribute("data-uuid", normal_msg_div.lastChild.dataset.uuid)
-    new_story.setAttribute("onclick", "go_back_to_story(" + (Math.ceil(normal_msg_div.childElementCount / 2 - 1)).toString() + ")")
     normal_msg_div.append(new_story)
     new_story.scrollIntoView({ behavior: "smooth" })
 
@@ -313,12 +370,12 @@ function send_notification(text, is_warning) {
 
 function open_sidebar(e) {
     e.stopPropagation()
-    document.getElementById("sidebar").style.width = "350px";
+    document.getElementById("sidebar").style.right = "0px";
 }
 
 function close_sidebar(e) {
     e.stopPropagation()
-    document.getElementById("sidebar").style.width = "0";
+    document.getElementById("sidebar").style.right = "-350px";
 }
 
 function absorb_click(e) {
@@ -328,13 +385,28 @@ function absorb_click(e) {
 window.onload = function() {
     let normal_msg_div = document.querySelector("#normal-messages-div")
     if (normal_msg_div != null) {
-        normal_msg_div.lastChild.scrollIntoView(true);
+        normal_msg_div.lastChild.scrollIntoView({ behavior: "instant"});
     }
 }
 
 window.onclick = function(e) {
     let sidebar = document.getElementById("sidebar")
     if (sidebar != null) {
-        sidebar.style.width = "0";
+        sidebar.style.right = "-350px";
+    }
+}
+
+function osu_search(elem, e) {
+    if(e.key === 'Enter') {
+        const url = new URL(window.location.href);
+        const searchParams = new URLSearchParams(document.location.search);
+        
+        if (elem.value == '') {
+            url.searchParams.delete('search')
+        } else {
+            url.searchParams.set('search', elem.value);
+        }
+        url.searchParams.delete('page')
+        document.location.href = url.toString();
     }
 }

@@ -1,7 +1,10 @@
 use {
     crate::AppState,
     axum::{
-        http::{header::InvalidHeaderValue, StatusCode},
+        http::{
+            header::{InvalidHeaderValue, ToStrError},
+            StatusCode,
+        },
         response::{IntoResponse, Response},
     },
     rand::seq::WeightError,
@@ -23,37 +26,6 @@ impl IntoResponse for AppError {
         let (status, message): (StatusCode, String) = match self {
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::InternalServerError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-            // AppError::TransactionError(transaction_error) => (
-            //     StatusCode::INTERNAL_SERVER_ERROR,
-            //     transaction_error.to_string(),
-            // ),
-            // AppError::StorageError(storage_error) => {
-            //     (StatusCode::INTERNAL_SERVER_ERROR, storage_error.to_string())
-            // }
-            // AppError::TableError(table_error) => {
-            //     (StatusCode::INTERNAL_SERVER_ERROR, table_error.to_string())
-            // }
-            // AppError::JoinError(join_error) => {
-            //     (StatusCode::INTERNAL_SERVER_ERROR, join_error.to_string())
-            // }
-            // AppError::CommitError(commit_error) => {
-            //     (StatusCode::INTERNAL_SERVER_ERROR, commit_error.to_string())
-            // }
-            // AppError::SystemTimeError(systemtime_error) => (
-            //     StatusCode::INTERNAL_SERVER_ERROR,
-            //     systemtime_error.to_string(),
-            // ),
-            // AppError::InvalidHeaderValue(invalidheader_error) => (
-            //     StatusCode::INTERNAL_SERVER_ERROR,
-            //     invalidheader_error.to_string(),
-            // ),
-            // AppError::WeightError(weighterror_error) => (
-            //     StatusCode::INTERNAL_SERVER_ERROR,
-            //     weighterror_error.to_string(),
-            // ),
-            // AppError::SessionError(session_error) => {
-            //     (StatusCode::INTERNAL_SERVER_ERROR, session_error.to_string())
-            // }
         };
 
         (status, message).into_response()
@@ -128,6 +100,42 @@ impl From<axum_login::Error<AppState>> for AppError {
             }
             axum_login::Error::Backend(app_error) => app_error,
         }
+    }
+}
+
+impl From<tower_sessions::session::Error> for AppError {
+    fn from(session_err: tower_sessions::session::Error) -> Self {
+        AppError::InternalServerError(session_err.to_string())
+    }
+}
+
+impl From<uuid::Error> for AppError {
+    fn from(uuid_error: uuid::Error) -> Self {
+        AppError::InternalServerError(uuid_error.to_string())
+    }
+}
+
+impl From<ToStrError> for AppError {
+    fn from(to_str_error: ToStrError) -> Self {
+        AppError::InternalServerError(to_str_error.to_string())
+    }
+}
+
+impl From<sqlx::Error> for AppError {
+    fn from(sqlx_error: sqlx::Error) -> Self {
+        AppError::InternalServerError(sqlx_error.to_string())
+    }
+}
+
+impl From<argon2::password_hash::Error> for AppError {
+    fn from(argon2_error: argon2::password_hash::Error) -> Self {
+        AppError::InternalServerError(argon2_error.to_string())
+    }
+}
+
+impl From<Box<bincode::ErrorKind>> for AppError {
+    fn from(bincode_error: Box<bincode::ErrorKind>) -> Self {
+        AppError::InternalServerError(bincode_error.to_string())
     }
 }
 

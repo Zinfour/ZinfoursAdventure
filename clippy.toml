@@ -1,0 +1,3 @@
+disallowed-methods = [
+    "sqlx::query_as",
+]
