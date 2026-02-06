@@ -1,8 +1,6 @@
 #![feature(trivial_bounds)]
 #![feature(duration_constructors)]
-#![allow(unused_imports)]
 #![deny(clippy::disallowed_methods)]
-// #![allow(dead_code)]
 mod app_error;
 
 use {
@@ -12,65 +10,40 @@ use {
         Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
     },
     async_trait::async_trait,
-    aws_lc_rs::digest::{digest, Context, Digest, SHA256},
     axum::{
-        body::Bytes,
         extract::{
-            connect_info::ConnectInfo,
-            ws::{CloseFrame, Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
-            FromRequestParts, OriginalUri, Path, Query, Request, State,
+            Path, Query, Request, State,
         },
-        http::{request::Parts, uri::Authority, HeaderMap, HeaderValue, StatusCode, Uri},
-        response::{IntoResponse, Redirect, Response},
-        routing::{any, get, post, put},
+        http::{HeaderMap, HeaderValue, StatusCode},
+        response::{Redirect},
+        routing::{get, post},
         Form, Json, Router, ServiceExt,
     },
     axum_extra::{
         extract::{
             cookie::{Cookie, CookieJar},
-            Host,
         },
-        headers::authorization::{Authorization, Bearer},
-        TypedHeader,
     },
     axum_login::{AuthManagerLayerBuilder, AuthSession, AuthUser, AuthnBackend, UserId},
     axum_server::tls_rustls::RustlsConfig,
-    bincode::{deserialize, serialize},
-    futures::{sink::SinkExt, stream::StreamExt, try_join},
-    itertools::Itertools,
-    maud::{html, Escaper, Markup, PreEscaped, Render, DOCTYPE},
+    maud::{html, Escaper, Markup, Render, DOCTYPE},
     rand::{prelude::*, rng},
-    // redb::{
-    //     backends::{FileBackend, InMemoryBackend},
-    //     Database, Key, MultimapTableDefinition, ReadableTable, ReadableTableMetadata,
-    //     TableDefinition, TypeName, Value,
-    // },
-    serde::{de::DeserializeOwned, Deserialize, Serialize},
-    serde_inline_default::serde_inline_default,
+    serde::{Deserialize, Serialize},
     sqlx::{
-        decode,
-        postgres::{PgConnectOptions, PgPoolOptions, PgTypeInfo},
-        query,
+        postgres::PgPoolOptions,
         types::Uuid,
-        Database, Encode, FromRow, PgPool, Pool, Postgres, Row,
+        FromRow, PgPool, Pool, Postgres,
     },
-    std::fs::read_to_string,
     std::{
-        any::type_name,
-        cmp::Ordering,
         fmt::{Debug, Write},
         fs::File,
-        future::Future,
         io::BufRead,
         net::SocketAddr,
-        ops::ControlFlow,
         path::PathBuf,
         str::FromStr,
         sync::Arc,
         time::{Duration, SystemTime, UNIX_EPOCH},
     },
-    tokio::net::TcpListener,
-    tokio::task::spawn_blocking,
     tower::Layer,
     tower_governor::{governor::GovernorConfigBuilder, GovernorLayer},
     tower_http::{
@@ -81,26 +54,11 @@ use {
         CompressionLevel,
     },
     tower_sessions::{
-        session::Record, session_store::ExpiredDeletion, Expiry, Session, SessionManagerLayer,
-        SessionStore,
+        Expiry, SessionManagerLayer,
     },
     tower_sessions_sqlx_store::PostgresStore,
-    tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt},
 };
-use {bincode::de, dotenvy::dotenv};
-
-// const ADVENTURE_STEPS_TABLE: TableDefinition<Bincode<Uuid>, Bincode<AdventureStep>> =
-//     TableDefinition::new("adventure_steps");
-// const AUTH_USERS_TABLE: TableDefinition<Bincode<String>, Bincode<UserData>> =
-//     TableDefinition::new("users");
-// const CHILDREN_TABLE: MultimapTableDefinition<Bincode<Uuid>, Bincode<Uuid>> =
-//     MultimapTableDefinition::new("children_links");
-// const USER_HISTORY_TABLE: MultimapTableDefinition<Bincode<Uuid>, Bincode<UserInteraction>> =
-//     MultimapTableDefinition::new("user_history");
-// const LAST_SEEN_ACTIONS_TABLE: TableDefinition<Bincode<(Uuid, Uuid)>, Bincode<Vec<Uuid>>> =
-//     TableDefinition::new("last_seen_actions");
-// const ADVENTURES_TABLE: TableDefinition<Bincode<Uuid>, Bincode<Adventure>> =
-//     TableDefinition::new("adventures");
+use dotenvy::dotenv;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
 struct AdventureStep {
@@ -123,68 +81,6 @@ enum UserIdent {
     Username(String),
     SessionId(Uuid),
 }
-
-// impl sqlx::Type<Postgres> for UserIdent {
-//     fn type_info() -> <Postgres as Database>::TypeInfo {
-//         <(bool, Option<String>, Option<Uuid>)>::type_info()
-//     }
-// }
-
-// impl sqlx::Decode<'_, Postgres> for UserIdent {
-//     fn decode(
-//         value: <Postgres as Database>::ValueRef<'_>,
-//     ) -> Result<Self, sqlx::error::BoxDynError> {
-//         let (is_username, username, session_id) =
-//             <(bool, Option<String>, Option<Uuid>)>::decode(value)?;
-//         if is_username {
-//             username
-//                 .map(UserIdent::Username)
-//                 .ok_or(Box::new(AppError::InternalServerError(
-//                     "missing username".to_string(),
-//                 )))
-//         } else {
-//             session_id
-//                 .map(UserIdent::SessionId)
-//                 .ok_or(Box::new(AppError::InternalServerError(
-//                     "missing session id".to_string(),
-//                 )))
-//         }
-//     }
-// }
-
-// impl sqlx::Encode<'_, Postgres> for UserIdent {
-//     fn encode_by_ref(
-//         &self,
-//         buf: &mut <Postgres as Database>::ArgumentBuffer<'_>,
-//     ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
-//         match &self {
-//             UserIdent::Username(username) => {
-//                 let tmp: (bool, Option<String>, Option<Uuid>) = (true, Some(username.clone()), None);
-//                 sqlx::Encode::<'_, Postgres>::encode(tmp, buf)?;
-//             },
-//             UserIdent::SessionId(session_id) => todo!(),
-//         }
-//         Ok(sqlx::encode::IsNull::No)
-//     }
-// }
-
-// #[derive(FromRow, Clone, PartialEq, Serialize, Deserialize)]
-// struct UserData {
-//     username: String,
-//     pw_hash: String,
-//     user_vector: Vec<f32>, // TODO: use this to embed/rank stories and actions
-// }
-
-// Custom Debug implentation so that we never print the password.
-// impl Debug for UserData {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("User")
-//             .field("username", &self.username)
-//             .field("pw_hash", &"_")
-//             .field("user_vector", &self.user_vector)
-//             .finish()
-//     }
-// }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 struct User {
@@ -281,69 +177,6 @@ impl AuthnBackend for AppState {
     }
 }
 
-// #[async_trait]
-// impl SessionStore for AppState {
-//     /// Creates a new session in the store with the provided session record.
-//     ///
-//     /// Implementers must decide how to handle potential ID collisions. For
-//     /// example, they might generate a new unique ID or return `Error::Backend`.
-//     ///
-//     /// The record is given as an exclusive reference to allow modifications,
-//     /// such as assigning a new ID, during the creation process.
-//     async fn create(
-//         &self,
-//         session_record: &mut Record,
-//     ) -> tower_sessions::session_store::Result<()> {
-//         todo!()
-//     }
-
-//     /// Saves the provided session record to the store.
-//     ///
-//     /// This method is intended for updating the state of an existing session.
-//     async fn save(&self, session_record: &Record) -> tower_sessions::session_store::Result<()> {
-//         todo!()
-//     }
-
-//     /// Loads an existing session record from the store using the provided ID.
-//     ///
-//     /// If a session with the given ID exists, it is returned. If the session
-//     /// does not exist or has been invalidated (e.g., expired), `None` is
-//     /// returned.
-//     async fn load(
-//         &self,
-//         session_id: &tower_sessions::session::Id,
-//     ) -> tower_sessions::session_store::Result<Option<Record>> {
-//         todo!()
-//     }
-
-//     /// Deletes a session record from the store using the provided ID.
-//     ///
-//     /// If the session exists, it is removed from the store.
-//     async fn delete(
-//         &self,
-//         session_id: &tower_sessions::session::Id,
-//     ) -> tower_sessions::session_store::Result<()> {
-//         todo!()
-//     }
-// }
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PartialOrd, Eq)]
-enum UserInteractionData {
-    SawStory(Uuid),
-    SawNewActions(Vec<Uuid>),
-    SawActions(Vec<Uuid>),
-    PressedAction(Uuid),
-    RefreshedActions(Vec<Uuid>),
-    RefreshedStory(Uuid),
-    AddedActionAndStory(Uuid),
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PartialOrd, Eq)]
-struct UserInteraction {
-    time: u64,
-    interaction: UserInteractionData,
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
 struct Adventure {
     key: Uuid,
@@ -367,56 +200,6 @@ struct AppState {
     osu_fruits_leaderboard: Arc<Vec<(usize, String, f32, usize)>>,
     osu_mania_leaderboard: Arc<Vec<(usize, String, f32, usize)>>,
 }
-
-// /// Wrapper type to handle keys and values using bincode serialization
-// #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-// pub struct Bincode<T>(pub T);
-
-// impl<T: Serialize, DB: Database> sqlx::Encode<'_, DB> for Bincode<T>
-// where
-//     for<'a> Vec<u8>: sqlx::Encode<'a, DB>,
-// {
-//     fn encode_by_ref(
-//         &self,
-//         buf: &mut <DB as sqlx::Database>::ArgumentBuffer<'_>,
-//     ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
-//         <Vec<u8> as sqlx::Encode<'_, DB>>::encode_by_ref(&bincode::serialize(&self.0)?, buf)
-//     }
-// }
-
-// impl<T, DB: Database> sqlx::Decode<'_, DB> for Bincode<T>
-// where
-//     for<'a> T: Deserialize<'a>,
-//     for<'a> Vec<u8>: sqlx::Decode<'a, DB>,
-// {
-//     fn decode(value: <DB as Database>::ValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
-//         Ok(Bincode(bincode::deserialize(
-//             &<Vec<u8> as sqlx::Decode<'_, DB>>::decode(value)?,
-//         )?))
-//     }
-// }
-// impl<T, DB: Database> sqlx::Type<DB> for Bincode<T>
-// where
-//     Vec<u8>: sqlx::Type<DB>,
-// {
-//     fn type_info() -> <DB as sqlx::Database>::TypeInfo {
-//         <Vec<u8> as sqlx::Type<DB>>::type_info()
-//     }
-// }
-
-// impl<T> TryFrom<Vec<u8>> for Bincode<T> {
-//     type Error = AppError;
-
-//     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-//         todo!()
-//     }
-// }
-
-// #[derive(Debug, Clone, Deserialize)]
-// struct Credentials {
-//     username: String,
-//     password: String,
-// }
 
 fn get_unix_time() -> u64 {
     let start = SystemTime::now();
@@ -534,15 +317,6 @@ async fn main() {
             ServeFile::new(assets_dir.join("favicon.ico")),
         )
         .route_service("/logo.png", ServeFile::new(assets_dir.join("logo.png")))
-        // .route_service(
-        //     "/logo.png",
-        //     ServeFile::new(assets_dir.join("osu_logo.png")),
-        // )
-        // .route_service(
-        //     "/osu_logo.ico",
-        //     ServeFile::new(assets_dir.join("osu_logo.ico")),
-        // )
-        // .route("/ws", any(ws_handler))
         .layer(GovernorLayer {
             config: governor_conf,
         })
@@ -619,7 +393,6 @@ fn header_and_sidebar(title: &str, editable: bool, user: &UserIdent) -> Markup {
             }
             hr;
             a href="/adventure/about" { "About" }
-            // a href="https://discord.gg/xqkd9PCrgs" { "Discord" }
             a href="https://zinfour.bsky.social" { "Bluesky" }
             a href="https://twitter.com/zinfour_" { "Twitter" }
         }
@@ -1814,10 +1587,7 @@ async fn osu_page(
 }
 
 #[axum::debug_handler]
-async fn homepage(
-    State(state): State<AppState>,
-    Query(query): Query<OsuQuery>,
-) -> Result<Markup, AppError> {
+async fn homepage() -> Result<Markup, AppError> {
     let document = html! {
         (DOCTYPE)
         html lang="en" {
