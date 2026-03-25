@@ -1,1 +1,10 @@
 /target
+*.png
+*.ico
+*.lock
+*.key
+*.pem
+*.blend
+*.blend1
+*.svg
+*.env
