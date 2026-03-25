@@ -6,34 +6,25 @@ mod app_error;
 use {
     app_error::AppError,
     argon2::{
-        password_hash::{rand_core::OsRng, SaltString},
         Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
+        password_hash::{SaltString, rand_core::OsRng},
     },
     async_trait::async_trait,
     axum::{
-        extract::{
-            Path, Query, Request, State,
-        },
-        http::{HeaderMap, HeaderValue, StatusCode},
-        response::{Redirect},
-        routing::{get, post},
         Form, Json, Router, ServiceExt,
+        extract::{Path, Query, Request, State},
+        http::{HeaderMap, HeaderValue, StatusCode},
+        response::Redirect,
+        routing::{get, post},
     },
-    axum_extra::{
-        extract::{
-            cookie::{Cookie, CookieJar},
-        },
-    },
+    axum_extra::extract::cookie::{Cookie, CookieJar},
     axum_login::{AuthManagerLayerBuilder, AuthSession, AuthUser, AuthnBackend, UserId},
     axum_server::tls_rustls::RustlsConfig,
-    maud::{html, Escaper, Markup, Render, DOCTYPE},
+    dotenvy::dotenv,
+    maud::{DOCTYPE, Escaper, Markup, PreEscaped, Render, html},
     rand::{prelude::*, rng},
     serde::{Deserialize, Serialize},
-    sqlx::{
-        postgres::PgPoolOptions,
-        types::Uuid,
-        FromRow, PgPool, Pool, Postgres,
-    },
+    sqlx::{FromRow, PgPool, Pool, Postgres, postgres::PgPoolOptions, types::Uuid},
     std::{
         fmt::{Debug, Write},
         fs::File,
@@ -45,20 +36,18 @@ use {
         time::{Duration, SystemTime, UNIX_EPOCH},
     },
     tower::Layer,
-    tower_governor::{governor::GovernorConfigBuilder, GovernorLayer},
+    tower_governor::{GovernorLayer, governor::GovernorConfigBuilder},
     tower_http::{
+        CompressionLevel,
         compression::CompressionLayer,
         normalize_path::NormalizePathLayer,
         services::ServeFile,
         trace::{DefaultMakeSpan, TraceLayer},
-        CompressionLevel,
     },
-    tower_sessions::{
-        Expiry, SessionManagerLayer,
-    },
+    tower_sessions::{Expiry, SessionManagerLayer, cookie::SameSite},
     tower_sessions_sqlx_store::PostgresStore,
+    tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt},
 };
-use dotenvy::dotenv;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromRow)]
 struct AdventureStep {
@@ -89,7 +78,6 @@ struct User {
     user_vector: Vec<f32>, // TODO: use this to embed/rank stories and actions
     session_hash: Vec<u8>,
 }
-
 
 impl Debug for User {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -223,19 +211,14 @@ async fn connect_to_database() -> PgPool {
 async fn main() {
     dotenv().ok();
 
-    // for (key, value) in std::env::vars() {
-    //     println!("{}: {}", key, value);
-    // }
-    // return;
-
-    // tracing_subscriber::registry()
-    //     .with(
-    //         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-    //             format!("{}=debug,tower_http=debug", env!("CARGO_CRATE_NAME")).into()
-    //         }),
-    //     )
-    //     .with(tracing_subscriber::fmt::layer())
-    //     .init();
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                format!("{}=debug,tower_http=debug", env!("CARGO_CRATE_NAME")).into()
+            }),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
     let governor_conf = Arc::new(
         GovernorConfigBuilder::default()
@@ -257,9 +240,11 @@ async fn main() {
     let governor_limiter = governor_conf.limiter().clone();
     let interval = Duration::from_secs(60);
     // a separate background task to clean up
-    std::thread::spawn(move || loop {
-        std::thread::sleep(interval);
-        governor_limiter.retain_recent();
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(interval);
+            governor_limiter.retain_recent();
+        }
     });
 
     let pool = connect_to_database().await;
@@ -268,12 +253,11 @@ async fn main() {
 
     let app_state = AppState {
         pool: pool.clone(),
-        osu_osu_leaderboard: Arc::new(read_osu_file("./osu_rankings/osu_ranking.txt")),
-        osu_taiko_leaderboard: Arc::new(read_osu_file("./osu_rankings/taiko_ranking.txt")),
-        osu_fruits_leaderboard: Arc::new(read_osu_file("./osu_rankings/catch_ranking.txt")),
-        osu_mania_leaderboard: Arc::new(read_osu_file("./osu_rankings/mania_ranking.txt")),
+        osu_osu_leaderboard: Arc::new(read_osu_file("./osu_rankings/osu_ranking.csv")),
+        osu_taiko_leaderboard: Arc::new(read_osu_file("./osu_rankings/taiko_ranking.csv")),
+        osu_fruits_leaderboard: Arc::new(read_osu_file("./osu_rankings/catch_ranking.csv")),
+        osu_mania_leaderboard: Arc::new(read_osu_file("./osu_rankings/mania_ranking.csv")),
     };
-
 
     let session_store = PostgresStore::new(pool);
     session_store.migrate().await.unwrap();
@@ -288,6 +272,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(homepage))
         .route("/osu", get(osu_page))
+        .route("/osu/stats", get(osu_stats_page))
         .route_service(
             "/adventure/directory",
             get(|| async { Redirect::permanent("/adventure") }),
@@ -300,7 +285,7 @@ async fn main() {
             ServeFile::new(assets_dir.join("twitter_preview.png")),
         )
         .route("/adventure/login", post(login))
-        .route("/adventure/logout", get(logout))
+        .route("/adventure/logout", post(logout))
         .route("/adventure/register", get(register_page))
         .route("/adventure/register_account", post(register))
         .route("/adventure/new", get(new_adventure_page))
@@ -334,8 +319,7 @@ async fn main() {
                 .quality(CompressionLevel::Best),
         );
 
-
-    let addr = SocketAddr::from(([192, 168, 1, 3], 443));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 443));
 
     axum_server::bind_rustls(addr, tls_config)
         .serve(
@@ -352,17 +336,21 @@ fn read_osu_file(file_path: &str) -> Vec<(usize, String, f32, usize)> {
     let file = File::open(file_path).unwrap();
     for (rank, line) in std::io::BufReader::new(file).lines().enumerate() {
         let tmp = line.unwrap();
-        let row: [&str; 4] = tmp.split(",").collect::<Vec<_>>().try_into().unwrap();
-        let (user_id, skill, _avg_rank, username): (
+        let row: [&str; 6] = tmp.split(",").collect::<Vec<_>>().try_into().unwrap();
+        let (user_id, skill, _avg_rank, username, _maps, _pp): (
             usize,
             f32,
             f32,
             String,
+            usize,
+            f32,
         ) = (
             row[0].parse().unwrap(),
             row[1].parse().unwrap(),
             row[2].parse().unwrap(),
             row[3].parse().unwrap(),
+            row[4].parse().unwrap(),
+            row[5].parse().unwrap(),
         );
         out.push((rank + 1, username, skill, user_id))
     }
@@ -376,7 +364,9 @@ fn header_and_sidebar(title: &str, editable: bool, user: &UserIdent) -> Markup {
 
             @if let UserIdent::Username(username) = user {
                 a #username { (username) }
-                a href="/adventure/logout" { "Logout" }
+                form action="/adventure/logout" method="post" style="display:inline;" {
+                    button type="submit" .link-button { "Logout" }
+                }
             } @else {
                 form #login-form action="/adventure/login" method="post" {
                     label {
@@ -540,7 +530,8 @@ async fn submit_adventure(
     };
     let adventure_key = Uuid::new_v4();
 
-    sqlx::query!("INSERT INTO Adventures (key, title, once_upon_a_time, created_by, creation_time, views, trending_views, length, hidden, item_vector, tags)
+    sqlx::query!(
+        "INSERT INTO Adventures (key, title, once_upon_a_time, created_by, creation_time, views, trending_views, length, hidden, item_vector, tags)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         adventure_key,
         payload.title,
@@ -554,8 +545,8 @@ async fn submit_adventure(
         &Vec::<f32>::new(),
         &Vec::<String>::new()
     )
-        .execute(&state.pool)
-        .await?;
+    .execute(&state.pool)
+    .await?;
     println!(">>> New adventure created: {}", adventure_key);
     Ok((jar, Json(adventure_key)))
 }
@@ -584,15 +575,24 @@ async fn adventure_story(
         .fetch_optional(&state.pool)
         .await?
         {
+            if adventure_steps.len() >= 10000 {
+                return Err(AppError::InternalServerError(
+                    "Encountered infinite loop.".to_string(),
+                ));
+            }
             let v_parent = v.parent;
             adventure_steps.push((current_uuid, v));
             current_uuid = v_parent;
         }
     }
-    let adventure = sqlx::query_as!(Adventure, "SELECT * FROM Adventures WHERE key = $1", &adventure_key)
-        .fetch_optional(&state.pool)
-        .await?
-        .ok_or("couldn't find adventure")?;
+    let adventure = sqlx::query_as!(
+        Adventure,
+        "SELECT * FROM Adventures WHERE key = $1",
+        &adventure_key
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or("couldn't find adventure")?;
 
     let user_ident = match auth_session.user {
         Some(user) => UserIdent::Username(user.username),
@@ -743,65 +743,77 @@ async fn directory_page(
 
             sqlx::query_as!(
                 Adventure,
-                "SELECT * FROM Adventures WHERE hidden = false and creation_time >= $1 ORDER BY views DESC LIMIT $2 OFFSET $3"
-                , (unix_time - 1000 * 60 * 60 * 24 * 365) as i64
-                , items_per_page as i64
-                , items_per_page * current_page.saturating_sub(1) as i64)
-                .fetch_all(&state.pool)
-                .await?
+                "SELECT * FROM Adventures WHERE hidden = false and creation_time >= $1 ORDER BY views DESC LIMIT $2 OFFSET $3",
+                (unix_time - 1000 * 60 * 60 * 24 * 365) as i64,
+                items_per_page as i64,
+                items_per_page * current_page.saturating_sub(1) as i64
+            )
+            .fetch_all(&state.pool)
+            .await?
         }
         Some(DirectorySortBy::TopThisMonth) => {
             let unix_time = get_unix_time();
-            sqlx::query_as!(Adventure, 
+            sqlx::query_as!(
+                Adventure,
                 "SELECT * FROM Adventures WHERE hidden = false and creation_time >= $1 ORDER BY views DESC LIMIT $2 OFFSET $3",
-            
-                (unix_time - 1000 * 60 * 60 * 24 * 30) as i64, 
-                items_per_page as i64, 
-                items_per_page * current_page.saturating_sub(1) as i64)
-                .fetch_all(&state.pool)
-                .await?
+                (unix_time - 1000 * 60 * 60 * 24 * 30) as i64,
+                items_per_page as i64,
+                items_per_page * current_page.saturating_sub(1) as i64
+            )
+            .fetch_all(&state.pool)
+            .await?
         }
         Some(DirectorySortBy::TopThisWeek) => {
             let unix_time = get_unix_time();
-            sqlx::query_as!(Adventure,
+            sqlx::query_as!(
+                Adventure,
                 "SELECT * FROM Adventures WHERE hidden = false and creation_time >= $1 ORDER BY views DESC LIMIT $2 OFFSET $3",
-                (unix_time - 1000 * 60 * 60 * 24 * 7) as i64, 
-                items_per_page as i64, 
-                items_per_page * current_page.saturating_sub(1) as i64)
-                .fetch_all(&state.pool)
-                .await?
+                (unix_time - 1000 * 60 * 60 * 24 * 7) as i64,
+                items_per_page as i64,
+                items_per_page * current_page.saturating_sub(1) as i64
+            )
+            .fetch_all(&state.pool)
+            .await?
         }
         Some(DirectorySortBy::TopThisDay) => {
             let unix_time = get_unix_time();
-            sqlx::query_as!(Adventure,
+            sqlx::query_as!(
+                Adventure,
                 "SELECT * FROM Adventures WHERE hidden = false and creation_time >= $1 ORDER BY views DESC LIMIT $2 OFFSET $3",
-                (unix_time - 1000 * 60 * 60 * 24) as i64, 
-                items_per_page as i64, 
-                items_per_page * current_page.saturating_sub(1) as i64)
-                .fetch_all(&state.pool)
-                .await?
+                (unix_time - 1000 * 60 * 60 * 24) as i64,
+                items_per_page as i64,
+                items_per_page * current_page.saturating_sub(1) as i64
+            )
+            .fetch_all(&state.pool)
+            .await?
         }
         Some(DirectorySortBy::Trending) => {
-            sqlx::query_as!(Adventure,
+            sqlx::query_as!(
+                Adventure,
                 "SELECT * FROM Adventures WHERE hidden = false ORDER BY trending_views DESC LIMIT $1 OFFSET $2",
                 items_per_page as i64,
-                items_per_page * current_page.saturating_sub(1) as i64)
+                items_per_page * current_page.saturating_sub(1) as i64
+            )
             .fetch_all(&state.pool)
             .await?
         }
         Some(DirectorySortBy::Length) => {
-            sqlx::query_as!(Adventure,
+            sqlx::query_as!(
+                Adventure,
                 "SELECT * FROM Adventures WHERE hidden = false ORDER BY length DESC LIMIT $1 OFFSET $2",
                 items_per_page as i64,
-                items_per_page * current_page.saturating_sub(1) as i64)
+                items_per_page * current_page.saturating_sub(1) as i64
+            )
             .fetch_all(&state.pool)
             .await?
         }
         Some(DirectorySortBy::Random) => {
-            sqlx::query_as!(Adventure,
+            sqlx::query_as!(
+                Adventure,
                 "SELECT * FROM Adventures WHERE hidden = false ORDER BY RANDOM() LIMIT $1 OFFSET $2",
                 items_per_page as i64,
-                items_per_page * current_page.saturating_sub(1) as i64)
+                items_per_page * current_page.saturating_sub(1) as i64
+            )
             .fetch_all(&state.pool)
             .await?
         }
@@ -1076,7 +1088,12 @@ struct NewStepStruct {
 fn get_or_create_session_id(mut jar: CookieJar) -> (CookieJar, Cookie<'static>) {
     if jar.get("session-id").is_none() {
         let salt = Uuid::new_v4();
-        jar = jar.add(Cookie::new("session-id", salt.to_string()));
+        jar = jar.add(
+            Cookie::build(("session-id", salt.to_string()))
+                .http_only(true)
+                .secure(true)
+                .same_site(SameSite::Strict),
+        );
     }
     let c = jar.get("session-id").unwrap().clone();
     (jar, c)
@@ -1113,23 +1130,28 @@ async fn new_step(
 
     let mut tx = state.pool.begin().await?;
 
-    if sqlx::query_as!(AdventureStep, "SELECT * FROM AdventureSteps WHERE key = $1", &payload.parent)
+    if sqlx::query_as!(
+        AdventureStep,
+        "SELECT * FROM AdventureSteps WHERE key = $1",
+        &payload.parent
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .is_none()
+        && sqlx::query_as!(
+            Adventure,
+            "SELECT * FROM Adventures WHERE key = $1",
+            &payload.parent
+        )
         .fetch_optional(&mut *tx)
         .await?
         .is_none()
-        && sqlx::query_as!(
-                Adventure,
-                "SELECT * FROM Adventures WHERE key = $1",
-                &payload.parent
-            )
-            .fetch_optional(&mut *tx)
-            .await?
-            .is_none()
     {
         Err("parent uuid is missing")?;
     }
 
-    sqlx::query!("
+    sqlx::query!(
+        "
             INSERT INTO AdventureSteps (key, action, story, parent, views, trending_views, created_by, creation_time, hidden, item_vector, tags)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         ",
@@ -1144,9 +1166,9 @@ async fn new_step(
         false,
         &Vec::<f32>::new(),
         &Vec::<String>::new()
-        )
-        .execute(&mut *tx)
-        .await?;
+    )
+    .execute(&mut *tx)
+    .await?;
 
     tx.commit().await?;
     Ok((jar, Json(new_step_uuid)))
@@ -1183,11 +1205,19 @@ async fn choose_children_and_update_views(
         let mut actions_and_stories = vec![];
         let mut current_key = step_key;
 
-        while let Some(v) =
-            sqlx::query_as!(AdventureStep, "SELECT * FROM AdventureSteps WHERE key = $1", &current_key)
-                .fetch_optional(&state.pool)
-                .await?
+        while let Some(v) = sqlx::query_as!(
+            AdventureStep,
+            "SELECT * FROM AdventureSteps WHERE key = $1",
+            &current_key
+        )
+        .fetch_optional(&state.pool)
+        .await?
         {
+            if actions_and_stories.len() >= 10000 {
+                return Err(AppError::InternalServerError(
+                    "Encountered infinite loop.".to_string(),
+                ));
+            }
             let v_parent = v.parent;
             actions_and_stories.push(current_key);
             current_key = v_parent;
@@ -1222,7 +1252,7 @@ async fn choose_children(
     uuid: Uuid,
 ) -> Result<Vec<AdventureStep>, AppError> {
     let all_children = sqlx::query_as!(
-        AdventureStep, 
+        AdventureStep,
         "SELECT * FROM AdventureSteps WHERE parent = $1 and hidden = false",
         &uuid
     )
@@ -1477,7 +1507,9 @@ async fn osu_page(
         all_players = Arc::new(
             all_players
                 .iter()
-                .filter(|(_, name, _, _)| name.to_lowercase().contains(&pattern.to_lowercase()))
+                .filter(|(_, name, _, _)| {
+                    name.to_lowercase().contains(&pattern.trim().to_lowercase())
+                })
                 .cloned()
                 .collect(),
         )
@@ -1495,7 +1527,7 @@ async fn osu_page(
             (osu_head())
             body {
                 #title-header {
-                    a href="/osu" {
+                    a href="/" {
                         #logo-div {
                             img #logo src="/logo.png" alt="Zinfour's logo";
                         }
@@ -1506,12 +1538,14 @@ async fn osu_page(
                     #osu-blurb {
                         "This is a leaderboard for ";
                         a href="https://osu.ppy.sh/" {"osu!"};
-                        " based on leaderboard positions on individual maps. Don't focus on the skill value, it doesn't mean much. Source can be found on ";
+                        " based on leaderboard positions on individual maps which is then used to estimate a skill value for each player similar to an elo rating in chess. Source can be found on ";
                         a href="https://github.com/Zinfour/osu-ranker" {"Github"};
+                        " and some pretty graphs can be found "
+                        a href="/osu/stats" {"here"};
                         "."
                     }
                     #osu-about {
-                        "Last updated: 2026-02-01"
+                        "Last updated: 2026-03-01"
                     }
                     #osu-settings {
                         select #sort-by onchange="document.location.href=\"/osu?mode=\" + this.value" {
@@ -1587,6 +1621,38 @@ async fn osu_page(
 }
 
 #[axum::debug_handler]
+async fn osu_stats_page() -> Result<Markup, AppError> {
+    let document = html! {
+        (DOCTYPE)
+        html lang="en" {
+            (osu_head())
+            body {
+                #title-header {
+                    a href="/" {
+                        #logo-div {
+                            img #logo src="/logo.png" alt="Zinfour's logo";
+                        }
+                    }
+                    p { "Zinfour's osu! Leaderboard" }
+                }
+                #center-div {
+                    #osu-blurb {
+                        "Here you can see the player's estimated skill compared to pp for each gamemode. We can see that they all look normal except for catch. I'm not sure why that is. My best guess is that SS's are more common in catch which somehow pulls down the better player's skill rating. Or maybe their pp system is borked ;).";
+                        br;
+                        "Another thing worth noting is that you can see a separation between 4K and 7K for mania."
+                    }
+                    (PreEscaped(include_str!("../assets/plots/osu_plot.svg")))
+                    (PreEscaped(include_str!("../assets/plots/taiko_plot.svg")))
+                    (PreEscaped(include_str!("../assets/plots/catch_plot.svg")))
+                    (PreEscaped(include_str!("../assets/plots/mania_plot.svg")))
+                }
+            }
+        }
+    };
+    Ok(document)
+}
+
+#[axum::debug_handler]
 async fn homepage() -> Result<Markup, AppError> {
     let document = html! {
         (DOCTYPE)
@@ -1611,7 +1677,7 @@ async fn homepage() -> Result<Markup, AppError> {
             }
             body {
                 #title-header {
-                    a href="/osu" {
+                    a href="/" {
                         #logo-div {
                             img #logo src="/logo.png" alt="Zinfour's logo";
                         }

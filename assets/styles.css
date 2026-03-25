@@ -192,7 +192,7 @@ a[href=""], a:not([href]) {
 }
 
 #editing-messages-div {
-  flex-basis: 164px;
+  flex-basis: 210px;
   flex-shrink: 0;
   margin-top: 0px;
   margin-bottom: 0px;
@@ -754,6 +754,12 @@ input[type="submit"] {
 }
 
 /* Osu ranker */
+svg {
+  align-self: center;
+  width: 100%;
+  max-width: 600px;
+  height: auto;
+}
 
 
 
