@@ -34,7 +34,8 @@ axum-login = "0.17"
 tower-sessions = "0.14"
 aws-lc-rs = "1.13"
 async-trait = "0.1"
-sqlx = { version = "0.8", features = ["derive", "postgres", "runtime-tokio", "uuid"]}
+sqlx = { version = "0.8", features = ["derive", "postgres", "runtime-tokio", "uuid", "time"]}
 argon2 = "0.5"
 tower-sessions-sqlx-store = { version = "0.15", features = ["postgres"]}
-dotenvy = "0.15.7"
+dotenvy = "0.15"
+time = "0.3"

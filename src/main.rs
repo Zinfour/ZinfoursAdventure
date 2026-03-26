@@ -35,6 +35,7 @@ use {
         sync::Arc,
         time::{Duration, SystemTime, UNIX_EPOCH},
     },
+    time::OffsetDateTime,
     tower::Layer,
     tower_governor::{GovernorLayer, governor::GovernorConfigBuilder},
     tower_http::{
@@ -55,24 +56,25 @@ struct AdventureStep {
     action: String,
     story: String,
     parent: Uuid,
+    created_by: Vec<u8>, // UserIdent serialized by bincode because we can't go directly from postgres to UserIdent, see: https://github.com/launchbadge/sqlx/issues/514
     views: i64,
     // like views but decays by 50% every day
-    trending_views: i64,
-    created_by: Vec<u8>, // UserIdent serialized by bincode because we can't go directly from postgres to UserIdent, see: https://github.com/launchbadge/sqlx/issues/514
-    creation_time: i64,
+    trending_views: f32,
     hidden: bool,
     item_vector: Vec<f32>, // TODO: use this to embed/rank stories and actions
     tags: Vec<String>,
+    creation_time: OffsetDateTime,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 enum UserIdent {
-    Username(String),
+    UserId(i64),
     SessionId(Uuid),
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 struct User {
+    key: i64,
     username: String,
     pw_hash: String,
     user_vector: Vec<f32>, // TODO: use this to embed/rank stories and actions
@@ -135,6 +137,7 @@ impl AuthnBackend for AppState {
                 .as_bytes()
                 .to_vec();
             Ok(Some(User {
+                key: user_data.key,
                 username: user_data.username,
                 pw_hash: user_data.pw_hash,
                 user_vector: user_data.user_vector,
@@ -157,6 +160,7 @@ impl AuthnBackend for AppState {
             .as_bytes()
             .to_vec();
         Ok(Some(User {
+            key: user_data.key,
             username: user_data.username,
             pw_hash: user_data.pw_hash,
             user_vector: user_data.user_vector,
@@ -171,13 +175,13 @@ struct Adventure {
     title: String,
     once_upon_a_time: String,
     created_by: Vec<u8>, // UserIdent serialized by bincode because we can't go directly from postgres to UserIdent, see: https://github.com/launchbadge/sqlx/issues/514
-    creation_time: i64,
     views: i64,
-    trending_views: i64,
-    length: i64,
+    trending_views: f32,
+    step_count: i64,
     hidden: bool,
     item_vector: Vec<f32>, // TODO: use this to embed/rank stories and actions
     tags: Vec<String>,
+    creation_time: OffsetDateTime,
 }
 
 #[derive(Clone, Debug)]
@@ -357,13 +361,23 @@ fn read_osu_file(file_path: &str) -> Vec<(usize, String, f32, usize)> {
     out
 }
 
-fn header_and_sidebar(title: &str, editable: bool, user: &UserIdent) -> Markup {
-    html! {
+async fn header_and_sidebar(
+    state: &AppState,
+    title: &str,
+    editable: bool,
+    user: &UserIdent,
+) -> Result<Markup, AppError> {
+    Ok(html! {
         #sidebar onclick="absorb_click(event)" {
             a #close-button onclick="close_sidebar(event)" { "×" }
 
-            @if let UserIdent::Username(username) = user {
-                a #username { (username) }
+            @if let UserIdent::UserId(key) = user {
+                a #username { ({
+                    let user_data = sqlx::query!("SELECT * FROM Users WHERE key = $1", key)
+                        .fetch_optional(&state.pool)
+                        .await?
+                        .ok_or(AppError::BadRequest("bad id".to_string()))?;
+                    user_data.username}) }
                 form action="/adventure/logout" method="post" style="display:inline;" {
                     button type="submit" .link-button { "Logout" }
                 }
@@ -401,7 +415,7 @@ fn header_and_sidebar(title: &str, editable: bool, user: &UserIdent) -> Markup {
                 p { (title) }
             }
         }
-    }
+    })
 }
 
 fn adventure_head(adventure_title: Option<&str>) -> Markup {
@@ -461,9 +475,10 @@ fn notifications() -> Markup {
 async fn new_adventure_page(
     mut jar: CookieJar,
     auth_session: AuthSession<AppState>,
+    State(state): State<AppState>,
 ) -> Result<(CookieJar, Markup), AppError> {
     let user_ident = match auth_session.user {
-        Some(user) => UserIdent::Username(user.username),
+        Some(user) => UserIdent::UserId(user.key),
         None => {
             let (new_jar, c) = get_or_create_session_id(jar);
             jar = new_jar;
@@ -475,7 +490,7 @@ async fn new_adventure_page(
         html lang="en" {
             (adventure_head(Some("New Adventure")))
             body {
-                (header_and_sidebar("Title...", true, &user_ident))
+                (header_and_sidebar(&state, "Title...", true, &user_ident).await?)
                 (notifications())
                 #center-div {
                     #messages-div {
@@ -521,7 +536,7 @@ async fn submit_adventure(
         ));
     }
     let user_ident = match auth_session.user {
-        Some(user) => UserIdent::Username(user.username),
+        Some(user) => UserIdent::UserId(user.key),
         None => {
             let (new_jar, c) = get_or_create_session_id(jar);
             jar = new_jar;
@@ -531,16 +546,12 @@ async fn submit_adventure(
     let adventure_key = Uuid::new_v4();
 
     sqlx::query!(
-        "INSERT INTO Adventures (key, title, once_upon_a_time, created_by, creation_time, views, trending_views, length, hidden, item_vector, tags)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        "INSERT INTO Adventures (key, title, once_upon_a_time, created_by, hidden, item_vector, tags)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
         adventure_key,
         payload.title,
         payload.once_upon_a_time,
         bincode::serialize(&user_ident)?,
-        get_unix_time() as i64,
-        0,
-        0,
-        0,
         false,
         &Vec::<f32>::new(),
         &Vec::<String>::new()
@@ -595,7 +606,7 @@ async fn adventure_story(
     .ok_or("couldn't find adventure")?;
 
     let user_ident = match auth_session.user {
-        Some(user) => UserIdent::Username(user.username),
+        Some(user) => UserIdent::UserId(user.key),
         None => {
             let (new_jar, c) = get_or_create_session_id(jar);
             jar = new_jar;
@@ -608,7 +619,7 @@ async fn adventure_story(
         html lang="en" {
             (adventure_head(Some(&adventure.title)))
             body {
-                (header_and_sidebar(&adventure.title, false, &user_ident))
+                (header_and_sidebar(&state, &adventure.title, false, &user_ident).await?)
                 (notifications())
                 #center-div {
                     #messages-div {
@@ -800,7 +811,7 @@ async fn directory_page(
         Some(DirectorySortBy::Length) => {
             sqlx::query_as!(
                 Adventure,
-                "SELECT * FROM Adventures WHERE hidden = false ORDER BY length DESC LIMIT $1 OFFSET $2",
+                "SELECT * FROM Adventures WHERE hidden = false ORDER BY step_count DESC LIMIT $1 OFFSET $2",
                 items_per_page as i64,
                 items_per_page * current_page.saturating_sub(1) as i64
             )
@@ -842,7 +853,7 @@ async fn directory_page(
     ];
 
     let user_ident = match auth_session.user {
-        Some(user) => UserIdent::Username(user.username),
+        Some(user) => UserIdent::UserId(user.key),
         None => {
             let (new_jar, c) = get_or_create_session_id(jar);
             jar = new_jar;
@@ -855,7 +866,7 @@ async fn directory_page(
         html lang="en" {
             (adventure_head(None))
             body {
-                (header_and_sidebar("Zinfour's Adventure Database", false, &user_ident))
+                (header_and_sidebar(&state, "Zinfour's Adventure Database", false, &user_ident).await?)
                 (notifications())
                 #center-div {
                     #story-list {
@@ -908,9 +919,10 @@ async fn directory_page(
 async fn about_page(
     mut jar: CookieJar,
     auth_session: AuthSession<AppState>,
+    State(state): State<AppState>,
 ) -> Result<(CookieJar, Markup), AppError> {
     let user_ident = match auth_session.user {
-        Some(user) => UserIdent::Username(user.username),
+        Some(user) => UserIdent::UserId(user.key),
         None => {
             let (new_jar, c) = get_or_create_session_id(jar);
             jar = new_jar;
@@ -923,7 +935,7 @@ async fn about_page(
         html lang="en" {
             (adventure_head(Some("About")))
             body {
-                (header_and_sidebar("Zinfour's Adventure Database", false, &user_ident))
+                (header_and_sidebar(&state, "Zinfour's Adventure Database", false, &user_ident).await?)
                 #center-div {
                     img #logo src="/logo.png" alt="Zinfour's Adventure Database logo";
                     #about-text {
@@ -943,9 +955,10 @@ async fn about_page(
 async fn register_page(
     mut jar: CookieJar,
     auth_session: AuthSession<AppState>,
+    State(state): State<AppState>,
 ) -> Result<(CookieJar, Markup), AppError> {
     let user_ident = match auth_session.user {
-        Some(user) => UserIdent::Username(user.username),
+        Some(user) => UserIdent::UserId(user.key),
         None => {
             let (new_jar, c) = get_or_create_session_id(jar);
             jar = new_jar;
@@ -957,7 +970,7 @@ async fn register_page(
         html lang="en" {
             (adventure_head(Some("Register")))
             body {
-                (header_and_sidebar("Zinfour's Adventure Database", false, &user_ident))
+                (header_and_sidebar(&state, "Zinfour's Adventure Database", false, &user_ident).await?)
                 (notifications())
                 #center-div {
                     form #register-form action="/adventure/register_account" method="post" {
@@ -1048,7 +1061,7 @@ async fn login(
         transfer_from_session_id_user_to_auth_user(
             state,
             Uuid::from_str(cookie.value())?,
-            user.username,
+            user.key,
         )
         .await?;
         jar = jar.remove("session-id");
@@ -1109,7 +1122,7 @@ async fn new_step(
     if payload.action.is_empty() {
         return Err(AppError::BadRequest("Too short action.".to_string()));
     }
-    if payload.action.len() > 100 {
+    if payload.action.len() > 500 {
         return Err(AppError::BadRequest("Too long action.".to_string()));
     }
     if payload.story.is_empty() {
@@ -1120,7 +1133,7 @@ async fn new_step(
     }
     let new_step_uuid = Uuid::new_v4();
     let user_ident = match auth_session.user {
-        Some(user) => UserIdent::Username(user.username),
+        Some(user) => UserIdent::UserId(user.key),
         None => {
             let (new_jar, c) = get_or_create_session_id(jar);
             jar = new_jar;
@@ -1152,17 +1165,14 @@ async fn new_step(
 
     sqlx::query!(
         "
-            INSERT INTO AdventureSteps (key, action, story, parent, views, trending_views, created_by, creation_time, hidden, item_vector, tags)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            INSERT INTO AdventureSteps (key, action, story, parent, created_by, hidden, item_vector, tags)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ",
         new_step_uuid,
         payload.action,
         payload.story,
         payload.parent,
-        0,
-        0,
         bincode::serialize(&user_ident)?,
-        get_unix_time() as i64,
         false,
         &Vec::<f32>::new(),
         &Vec::<String>::new()
@@ -1270,24 +1280,25 @@ async fn choose_children(
 async fn moderation(
     mut jar: CookieJar,
     auth_session: AuthSession<AppState>,
+    State(state): State<AppState>,
 ) -> Result<(CookieJar, Markup), AppError> {
     let user_ident = match auth_session.user {
-        Some(user) => UserIdent::Username(user.username),
+        Some(user) => UserIdent::UserId(user.key),
         None => {
             let (new_jar, c) = get_or_create_session_id(jar);
             jar = new_jar;
             UserIdent::SessionId(Uuid::from_str(c.value())?)
         }
     };
-    if let UserIdent::Username(username) = &user_ident
-        && username == "zinfour"
+    if let UserIdent::UserId(id) = &user_ident
+        && *id == 1
     {
         let document = html! {
             (DOCTYPE)
             html lang="en" {
                 (adventure_head(Some("Moderation")))
                 body {
-                    (header_and_sidebar("Zinfour's Adventure Database", false, &user_ident))
+                    (header_and_sidebar(&state, "Zinfour's Adventure Database", false, &user_ident).await?)
                     (notifications())
                     #center-div {
                         #moderation-div {
@@ -1324,15 +1335,15 @@ async fn hide_uuid(
     auth_session: AuthSession<AppState>,
 ) -> Result<(CookieJar, StatusCode), AppError> {
     let user_ident = match auth_session.user {
-        Some(user) => UserIdent::Username(user.username),
+        Some(user) => UserIdent::UserId(user.key),
         None => {
             let (new_jar, c) = get_or_create_session_id(jar);
             jar = new_jar;
             UserIdent::SessionId(Uuid::from_str(c.value())?)
         }
     };
-    if let UserIdent::Username(username) = &user_ident
-        && username == "zinfour"
+    if let UserIdent::UserId(id) = &user_ident
+        && *id == 1
     {
         let mut tx = state.pool.begin().await?;
 
@@ -1368,15 +1379,15 @@ async fn delete_uuid(
     auth_session: AuthSession<AppState>,
 ) -> Result<(CookieJar, StatusCode), AppError> {
     let user_ident = match auth_session.user {
-        Some(user) => UserIdent::Username(user.username),
+        Some(user) => UserIdent::UserId(user.key),
         None => {
             let (new_jar, c) = get_or_create_session_id(jar);
             jar = new_jar;
             UserIdent::SessionId(Uuid::from_str(c.value())?)
         }
     };
-    if let UserIdent::Username(username) = &user_ident
-        && username == "zinfour"
+    if let UserIdent::UserId(id) = &user_ident
+        && *id == 1
     {
         let mut tx = state.pool.begin().await?;
         sqlx::query!(
@@ -1405,7 +1416,7 @@ async fn delete_uuid(
 async fn transfer_from_session_id_user_to_auth_user(
     state: AppState,
     session_id: Uuid,
-    username: String,
+    user_key: i64,
 ) -> Result<StatusCode, AppError> {
     let mut tx = state.pool.begin().await?;
 
@@ -1414,7 +1425,7 @@ async fn transfer_from_session_id_user_to_auth_user(
         "UPDATE Adventures
         SET created_by = $1
         WHERE created_by = $2",
-        bincode::serialize(&UserIdent::Username(username.clone()))?,
+        bincode::serialize(&UserIdent::UserId(user_key))?,
         bincode::serialize(&UserIdent::SessionId(session_id))?
     )
     .execute(&mut *tx)
@@ -1425,7 +1436,7 @@ async fn transfer_from_session_id_user_to_auth_user(
         "UPDATE AdventureSteps
         SET created_by = $1
         WHERE created_by = $2",
-        bincode::serialize(&UserIdent::Username(username.clone()))?,
+        bincode::serialize(&UserIdent::UserId(user_key))?,
         bincode::serialize(&UserIdent::SessionId(session_id))?,
     )
     .execute(&mut *tx)
