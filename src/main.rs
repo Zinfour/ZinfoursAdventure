@@ -1,5 +1,6 @@
 #![feature(trivial_bounds)]
 #![feature(duration_constructors)]
+#![feature(never_type)]
 #![deny(clippy::disallowed_methods)]
 mod app_error;
 
@@ -36,6 +37,7 @@ use {
         time::{Duration, SystemTime, UNIX_EPOCH},
     },
     time::OffsetDateTime,
+    tokio::task::{self, JoinHandle},
     tower::Layer,
     tower_governor::{GovernorLayer, governor::GovernorConfigBuilder},
     tower_http::{
@@ -231,13 +233,9 @@ async fn main() {
             .finish()
             .unwrap(),
     );
-
-    let tls_config = RustlsConfig::from_pem_file(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("zinfour.com.pem"),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("zinfour.com.key"),
-    )
-    .await
-    .unwrap();
+    let tls_config = RustlsConfig::from_pem_file("./zinfour.com.pem", "./zinfour.com.key")
+        .await
+        .unwrap();
 
     let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
 
@@ -263,7 +261,7 @@ async fn main() {
         osu_mania_leaderboard: Arc::new(read_osu_file("./osu_rankings/mania_ranking.csv")),
     };
 
-    let session_store = PostgresStore::new(pool);
+    let session_store = PostgresStore::new(pool.clone());
     session_store.migrate().await.unwrap();
 
     let session_layer = SessionManagerLayer::new(session_store).with_expiry(Expiry::OnInactivity(
@@ -325,6 +323,26 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 443));
 
+    // setup job to decrease trending views every hour (exp(ln(0.5)/24) = ~0.971, 0.971^24 = ~0.5)
+    let trending_views_task: JoinHandle<Result<!, sqlx::Error>> = task::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_hours(1));
+
+        loop {
+            interval.tick().await;
+            let t1 = sqlx::query!(
+                "UPDATE AdventureSteps SET trending_views = trending_views * 0.97153194115"
+            )
+            .execute(&pool);
+            let t2 = sqlx::query!(
+                "UPDATE Adventures SET trending_views = trending_views * 0.97153194115"
+            )
+            .execute(&pool);
+            let (res1, res2) = tokio::join!(t1, t2);
+            res1?;
+            res2?;
+        }
+    });
+
     axum_server::bind_rustls(addr, tls_config)
         .serve(
             ServiceExt::<Request>::into_make_service_with_connect_info::<SocketAddr>(
@@ -333,6 +351,8 @@ async fn main() {
         )
         .await
         .unwrap();
+
+    trending_views_task.await.unwrap().unwrap();
 }
 
 fn read_osu_file(file_path: &str) -> Vec<(usize, String, f32, usize)> {
@@ -667,7 +687,7 @@ async fn adventure_story(
     // TODO: I don't like increasing viewcount like this because then we write to the database on every request.
     // Doing this in maybe another thread to reduce latency.
     sqlx::query!(
-        "UPDATE Adventures SET views = views + 1 WHERE key = $1",
+        "UPDATE Adventures SET views = views + 1, trending_views = trending_views + 1 WHERE key = $1",
         &adventure_key
     )
     .execute(&state.pool)
@@ -676,7 +696,7 @@ async fn adventure_story(
     for (uuid, _) in adventure_steps {
         sqlx::query!(
             "UPDATE AdventureSteps
-             SET views = views + 1
+             SET views = views + 1, trending_views = trending_views + 1
              WHERE key = $1",
             &uuid
         )
@@ -1237,7 +1257,7 @@ async fn choose_children_and_update_views(
     let mut tx = state.pool.begin().await?;
     sqlx::query!(
         "UPDATE Adventures
-         SET views = views + 1
+         SET views = views + 1, trending_views = trending_views + 1
          WHERE key = $1",
         &adventure_key
     )
@@ -1246,7 +1266,7 @@ async fn choose_children_and_update_views(
     for key in adventure_steps {
         sqlx::query!(
             "UPDATE AdventureSteps
-            SET views = views + 1
+            SET views = views + 1, trending_views = trending_views + 1
             WHERE key = $1",
             &key
         )
